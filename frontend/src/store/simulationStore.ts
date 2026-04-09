@@ -1,0 +1,76 @@
+import { create } from "zustand";
+import type { SimulationResponse } from "@/types/simulation";
+
+interface SimState {
+  code: string;
+  pipeline: boolean;
+  result: SimulationResponse | null;
+  loading: boolean;
+  error: string | null;
+
+  // Playback
+  activeArch: "risc" | "cisc";
+  currentCycle: number;
+  playing: boolean;
+  speed: number; // 1, 2, 4, 8
+  learningMode: boolean;
+
+  // Actions
+  setCode: (code: string) => void;
+  setPipeline: (v: boolean) => void;
+  setResult: (r: SimulationResponse | null) => void;
+  setLoading: (v: boolean) => void;
+  setError: (e: string | null) => void;
+  setActiveArch: (a: "risc" | "cisc") => void;
+  setCurrentCycle: (c: number) => void;
+  setPlaying: (v: boolean) => void;
+  setSpeed: (s: number) => void;
+  setLearningMode: (v: boolean) => void;
+  stepForward: () => void;
+  resetPlayback: () => void;
+}
+
+const DEFAULT_CODE = `MOV R0, 5
+MOV R1, 3
+ADD R2, R0, R1
+STORE R2, 100
+LOAD R3, 100
+HALT`;
+
+export const useSimStore = create<SimState>((set, get) => ({
+  code: DEFAULT_CODE,
+  pipeline: false,
+  result: null,
+  loading: false,
+  error: null,
+  activeArch: "risc",
+  currentCycle: 0,
+  playing: false,
+  speed: 1,
+  learningMode: true,
+
+  setCode: (code) => set({ code }),
+  setPipeline: (pipeline) => set({ pipeline }),
+  setResult: (result) => {
+    const availableArch = result?.risc ? "risc" : result?.cisc ? "cisc" : "risc";
+    set({ result, activeArch: availableArch, currentCycle: 0, playing: false });
+  },
+  setLoading: (loading) => set({ loading }),
+  setError: (error) => set({ error }),
+  setActiveArch: (activeArch) => set({ activeArch, currentCycle: 0, playing: false }),
+  setCurrentCycle: (currentCycle) => set({ currentCycle }),
+  setPlaying: (playing) => set({ playing }),
+  setSpeed: (speed) => set({ speed }),
+  setLearningMode: (learningMode) => set({ learningMode }),
+  stepForward: () => {
+    const { result, activeArch, currentCycle } = get();
+    if (!result) return;
+    const timeline = result[activeArch]?.timeline ?? [];
+    if (currentCycle < timeline.length - 1) {
+      set({ currentCycle: currentCycle + 1 });
+    } else {
+      set({ playing: false });
+    }
+  },
+  resetPlayback: () => set({ currentCycle: 0, playing: false }),
+}));
