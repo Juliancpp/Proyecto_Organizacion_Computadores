@@ -117,22 +117,31 @@ export function DiagramTab() {
             <div className={`transition-all duration-700 ease-in-out space-y-3 ${showContent ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none h-0 overflow-hidden"}`}>
               <ExplanationPanel step={currentStep} />
               
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {currentStep?.beforeState && currentStep?.afterState && (
-                  <BeforeAfterPanel 
-                    beforeState={currentStep.beforeState} 
-                    afterState={currentStep.afterState} 
-                    operationLabel={currentStep.operationLabel} 
-                  />
-                )}
-                {currentStep?.decisionFlow && (
-                  <DecisionFlowPanel flow={currentStep.decisionFlow} />
-                )}
-              </div>
+              {currentStep?.beforeState && currentStep?.afterState && (
+                <BeforeAfterPanel 
+                  beforeState={currentStep.beforeState} 
+                  afterState={currentStep.afterState} 
+                  operationLabel={currentStep.operationLabel} 
+                />
+              )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <StatePanel step={currentStep} />
-                <CPUView activeArch={activeArch} step={currentStep} stepList={steps} />
+              <div className="flex flex-col gap-4">
+                {/* TOP SECTION: Decision Tree | Current State */}
+                <div className="flex flex-col lg:flex-row gap-3 items-stretch">
+                  {currentStep?.decisionFlow && (
+                    <div className="flex-1 min-w-0 flex flex-col">
+                      <DecisionFlowPanel flow={currentStep.decisionFlow} />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <StatePanel step={currentStep} />
+                  </div>
+                </div>
+
+                {/* BOTTOM SECTION: Arquitectura Global */}
+                <div className="w-full">
+                  <CPUView activeArch={activeArch} step={currentStep} stepList={steps} />
+                </div>
               </div>
 
               {currentStep?.microSummary && (

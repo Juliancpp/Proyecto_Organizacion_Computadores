@@ -80,6 +80,7 @@ function DataFlow({
         stroke={isActive ? color : "#2dd4bf"} 
         strokeOpacity={isActive ? 0.2 : 0.1}
         strokeWidth={isActive ? 6 : 3} 
+        strokeDasharray={isControl ? "8, 8" : "none"}
         markerEnd={`url(#arrowhead${isActive ? '-active' : '-dim'})`} 
         strokeLinejoin="round"
       />
@@ -92,7 +93,7 @@ function DataFlow({
           stroke={color}
           strokeWidth="3"
           strokeLinejoin="round"
-          initial={{ strokeDasharray: "15, 15", strokeDashoffset: 150 }}
+          initial={{ strokeDasharray: isControl ? "8, 12" : "15, 15", strokeDashoffset: 150 }}
           animate={{ strokeDashoffset: 0 }}
           transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
         />
@@ -104,10 +105,10 @@ function DataFlow({
            initial={{ opacity: 0.2, y: 5 }}
            animate={{ opacity: isActive ? 1 : 0.4, y: 0 }}
          >
-           <rect x={(labelX || 0) - 50} y={(labelY || 0) - 15} width={100} height={20} fill="#111" rx={4} />
+           <rect x={(labelX || 0) - 45} y={(labelY || 0) - 13} width={90} height={22} fill="#111" rx={4} stroke={isControl ? "#4c1d95" : "#164e63"} strokeWidth={1} />
            <text
              x={labelX}
-             y={labelY}
+             y={(labelY || 0) + 4}
              fill={isActive ? (isControl ? "#d8b4fe" : "#a5f3fc") : "#666"}
              fontSize="13"
              fontFamily="monospace"
@@ -139,17 +140,17 @@ export function CPUView({
   const isInstrMem = step?.stage === "IF";
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 h-full relative overflow-hidden flex flex-col justify-start">
-      <div className="text-sm font-mono text-muted-foreground uppercase mb-6 font-bold flex justify-between items-center z-10 relative">
+    <div className="rounded-xl border border-border bg-card p-2 sm:p-4 h-full relative overflow-hidden flex flex-col justify-start">
+      <div className="text-sm font-mono text-muted-foreground uppercase mb-3 px-2 pt-2 font-bold flex justify-between items-center z-10 relative">
         <span className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
           Arquitectura Global ({activeArch.toUpperCase()})
         </span>
       </div>
       
-      <div className="flex-1 w-full relative bg-black/30 rounded-lg p-2 min-h-[500px]">
+      <div className="flex-1 w-full relative bg-black/30 rounded-lg p-1 sm:p-2 min-h-[600px] lg:min-h-[700px] flex items-center justify-center">
         {/* SVG Container designed cleanly for scaling */}
-        <svg viewBox="0 0 1100 500" className="w-full h-full drop-shadow-xl overflow-visible">
+        <svg viewBox="0 0 1200 600" className="w-full h-full drop-shadow-2xl overflow-visible">
           <defs>
              {/* Dim Marker */}
             <marker id="arrowhead-dim" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -161,100 +162,95 @@ export function CPUView({
             </marker>
           </defs>
 
-          {/* Paths Map */}
-          {/* PC -> InstrMem */}
+          {/* Paths Map (Orthogonal Strict Layout) */}
+
+          {/* Instruction Lane (Top Row) */}
           <DataFlow 
-            d="M 120 140 L 220 140" 
+            d="M 120 150 L 205 150" 
             isActive={isInstrMem} 
-            label="Dirección" labelX={170} labelY={125} 
+            label="Dir." labelX={165} labelY={130} 
+          />
+          <DataFlow 
+            d="M 370 150 L 475 150" 
+            isActive={isInstrMem || isReg || isControl} 
+            label="Instrucción" labelX={425} labelY={130} 
           />
           
-          {/* InstrMem -> Regs */}
+          {/* Instruction to Control unit branch */}
           <DataFlow 
-            d="M 380 140 L 460 140" 
-            isActive={isControl || isInstrMem} 
-            label="Instrucción" labelX={420} labelY={125} 
-          />
-          
-          {/* InstrMem -> Control */}
-          <DataFlow 
-            d="M 300 180 L 300 320" 
+            d="M 400 150 L 400 360 L 440 360" 
             isActive={isControl} 
           />
-          <text x={300} y={250} fill={isControl ? "#a5f3fc" : "#666"} fontSize="12" fontFamily="monospace" textAnchor="middle" opacity={isControl ? 1 : 0.4} transform="rotate(-90 300 250)">
+          <text x={400} y={250} fill={isControl ? "#a5f3fc" : "#666"} fontSize="13" fontFamily="monospace" textAnchor="middle" opacity={isControl ? 1 : 0.4} transform="rotate(-90 400 250)">
             Opcode
           </text>
-          
-          {/* Control -> ALU (Signals) */}
+
+          {/* Data Execution Lane (Middle) */}
           <DataFlow 
-            d="M 380 360 L 640 360 L 640 280 L 700 280" 
+            d="M 620 130 L 755 130" 
+            isActive={isALU} 
+            label="Op 1" labelX={680} labelY={115} 
+          />
+          <DataFlow 
+            d="M 620 170 L 755 170" 
+            isActive={isALU} 
+            label="Op 2" labelX={680} labelY={185} 
+          />
+          <DataFlow 
+            d="M 880 170 L 975 170" 
+            isActive={isALU || isMem} 
+            label="Dir/Res" labelX={925} labelY={150} 
+          />
+
+          {/* Control Lane (Dashed Signals - Bottom & Vertical Snaps) */}
+          {/* Control -> ALU */}
+          <DataFlow 
+            d="M 620 340 L 820 340 L 820 250" 
             isActive={isALU || isControl} 
-            label="Señales Ctrl" labelX={510} labelY={350} 
+            label="ALU Ctrl" labelX={730} labelY={320} 
+            isControl={true}
+          />
+          {/* Control -> Memory */}
+          <DataFlow 
+            d="M 620 380 L 1050 380 L 1050 220" 
+            isActive={isMem || isControl} 
+            label="Mem Ctrl" labelX={860} labelY={360} 
+            isControl={true}
+          />
+          {/* Control -> Registers (RegWrite) */}
+          <DataFlow 
+            d="M 550 320 L 550 210" 
+            isActive={isReg || isControl} 
+            label="RegWrite" labelX={550} labelY={260} 
             isControl={true}
           />
 
-          {/* Control -> Memory (Signals) */}
-          <DataFlow 
-            d="M 380 380 L 920 380 L 920 230" 
-            isActive={isMem || isControl} 
-            label="Read/Write" labelX={650} labelY={395} 
-            isControl={true}
-          />
-          
-          {/* Regs -> ALU (Top Bus/Op1) */}
-          <DataFlow 
-            d="M 620 120 L 660 120 L 660 200 L 700 200" 
-            isActive={isALU} 
-            label="Op 1" labelX={650} labelY={110} 
-          />
-          {/* Regs -> ALU (Bottom Bus/Op2) */}
-          <DataFlow 
-            d="M 620 160 L 680 160 L 680 240 L 700 240" 
-            isActive={isALU} 
-            label="Op 2" labelX={680} labelY={150} 
-          />
-          
-          {/* ALU -> DataMem */}
-          <DataFlow 
-            d="M 820 220 L 860 220" 
-            isActive={isMem || isALU} 
-            label="Resul/Dir" labelX={840} labelY={205} 
-          />
-          
-          {/* Feedback Loops (Writeback) */}
+          {/* Writeback Loops (Top clearance) */}
           {/* DataMem -> Regs */}
           <DataFlow 
-            d="M 920 150 L 920 80 L 540 80 L 540 90" 
+            d="M 1120 170 L 1150 170 L 1150 40 L 550 40 L 550 90" 
             isActive={step?.stage === "WB"} 
-            label="Dato WB" labelX={730} labelY={70} 
+            label="Read Dato" labelX={860} labelY={25} 
           />
-          {/* ALU -> Regs (Direct Writeback) */}
+          {/* ALU -> Regs (Direct WB) */}
           <DataFlow 
-            d="M 820 240 L 840 240 L 840 60 L 560 60 L 560 90" 
+            d="M 900 170 L 900 65 L 530 65 L 530 90" 
             isActive={step?.stage === "WB" && step?.signals?.MemRead === 0} 
-            label="ALU WB" labelX={700} labelY={50} 
+            label="ALU WB" labelX={720} labelY={50} 
           />
 
-          {/* 
-            Geometry Map:
-            PC: x=40, y=100
-            InstrMem: x=240, y=100
-            Control: x=240, y=320
-            Regs: x=480, y=100
-            ALU: x=720, y=160
-            DataMem: x=880, y=150
-          */}
-          <GraphNode id="PC" label="PC" x={20} y={110} width={100} height={60} isActive={isPC} />
+          {/* Components Grid (Mapped perfectly to standard architecture layout) */}
+          {/* LEFT ZONE */}
+          <GraphNode id="PC" label="PC" x={40} y={120} width={80} height={60} isActive={isPC} />
+          <GraphNode id="INSTR_MEM" label="Mem. de Inst" x={210} y={110} width={160} height={80} isActive={isInstrMem} />
           
-          <GraphNode id="INSTR_MEM" label="Mem. de Inst" x={220} y={100} width={160} height={80} isActive={isInstrMem} />
+          {/* CENTER ZONE */}
+          <GraphNode id="REGISTERS" label="Registros" x={480} y={100} width={140} height={100} isActive={isReg} />
+          <GraphNode id="CONTROL" label="Unidad Control" x={440} y={320} width={180} height={80} isActive={isControl} />
           
-          <GraphNode id="CONTROL" label="Unidad Control" x={220} y={320} width={160} height={80} isActive={isControl} />
-          
-          <GraphNode id="REGISTERS" label="Registros" x={460} y={100} width={160} height={100} isActive={isReg} />
-          
-          <GraphNode id="ALU" label="ALU" x={700} y={170} width={120} height={140} isActive={isALU} />
-          
-          <GraphNode id="DATA_MEM" label="Mem. Datos" x={860} y={150} width={140} height={80} isActive={isMem} />
+          {/* RIGHT ZONE */}
+          <GraphNode id="ALU" label="ALU" x={760} y={100} width={120} height={140} isActive={isALU} />
+          <GraphNode id="DATA_MEM" label="Mem. Datos" x={980} y={130} width={140} height={80} isActive={isMem} />
 
         </svg>
       </div>
