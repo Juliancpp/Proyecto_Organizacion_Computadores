@@ -69,24 +69,24 @@ function readInstructionFromEvents(events: SimEvent[]): string {
 }
 
 function narrationForRiscStage(stage: string, event: SimEvent, instruction: string): string {
-  const op = instruction.split(" ")[0] || "Instruction";
+  const op = instruction.split(" ")[0] || "Instrucción";
   switch (stage) {
     case "IF":
-      return `The CPU starts by looking up the next instruction from memory using the Program Counter (PC).`;
+      return `La CPU comienza buscando la siguiente instrucción en la memoria usando el Contador de Programa (PC).`;
     case "ID":
-      return `The Control Unit reads '${op}'. It is now decoding what this means to configure the CPU's internal paths.`;
+      return `La Unidad de Control lee '${op}'. Ahora decodifica qué significa para configurar las rutas internas de la CPU.`;
     case "EX":
-      return `The ALU is now executing the arithmetic or logical part of the '${op}' operation.`;
+      return `La ALU está ejecutando la parte aritmética o lógica de la operación '${op}'.`;
     case "MEM":
       return event.action.includes("Read")
-        ? `The CPU is reading data from main memory.`
+        ? `La CPU está leyendo datos de la memoria principal.`
         : event.action.includes("Write")
-        ? `The CPU is storing the computed result into main memory.`
-        : `This '${op}' instruction doesn't need data memory, so it simply passes through this stage.`;
+        ? `La CPU está guardando el resultado en la memoria principal.`
+        : `Esta instrucción '${op}' no usa memoria de datos, por lo que simplemente pasa por esta etapa.`;
     case "WB":
-      return `Finally, the result is saved back into the internal Register File to complete the operation.`;
+      return `Finalmente, el resultado calculado se guarda en el archivo de registros interno (Register File).`;
     default:
-      return "Advancing instruction through the pipeline.";
+      return "Avanzando instrucción en el pipeline.";
   }
 }
 
@@ -101,57 +101,59 @@ function pathLabelForRisc(stage: string, event: SimEvent): string {
   }
 }
 
-function generateQuizForRiscStage(stage: string): Quiz {
+function generateQuizForRiscStage(stage: string, quizTracker: { count: number }): Quiz | undefined {
+  if (quizTracker.count >= 2) return undefined;
+
+  let quiz: Quiz | undefined;
   switch (stage) {
-    case "IF":
-      return {
-        question: "What must the CPU do first to execute an instruction?",
-        options: ["Fetch it from memory", "Run it in the ALU", "Store data in a register"],
-        answer: "Fetch it from memory",
-        explanation: "Before doing anything, the CPU needs to retrieve the instruction code from memory using the Program Counter."
-      };
     case "ID":
-      return {
-        question: "Which component is responsible for 'understanding' the instruction?",
-        options: ["ALU", "Control Unit", "Data Memory"],
-        answer: "Control Unit",
-        explanation: "The Control Unit decodes the opcode and activates the appropriate control signals for the datapath."
+      quiz = {
+        question: "¿Qué componente se activará ahora para decodificar?",
+        options: ["ALU", "Unidad de Control", "Registros", "PC"],
+        answer: "Unidad de Control",
+        explanation: "La Unidad de Control lee la instrucción y activa las señales para el datapath."
       };
+      break;
     case "EX":
-      return {
-        question: "Where does the mathematical or logical execution happen?",
-        options: ["Register File", "ALU", "Program Counter"],
+      quiz = {
+        question: "¿Dónde se ejecutan las operaciones matemáticas?",
+        options: ["Registros", "ALU", "PC"],
         answer: "ALU",
-        explanation: "The Arithmetic Logic Unit (ALU) performs all calculations (addition, logic, etc)."
+        explanation: "La ALU se encarga de todos los cálculos matemáticos (sumas, restas, lógica)."
       };
+      break;
     case "MEM":
-      return {
-        question: "Does every instruction use the Data Memory?",
-        options: ["Yes", "No"],
-        answer: "No",
-        explanation: "Only instructions like LOAD or STORE access data memory. Math instructions just pass through."
+      quiz = {
+        question: "¿Se accederá a memoria?",
+        options: ["Sí", "No"],
+        answer: "Sí",
+        explanation: "Las instrucciones LOAD/STORE leen o escriben memoria principal."
       };
+      break;
     case "WB":
-    default:
-      return {
-        question: "Where do we usually save the final computed result?",
-        options: ["Main Memory", "Register File", "Control Unit"],
-        answer: "Register File",
-        explanation: "Results from ALU or memory reads are written back to the fast Register File (Write-Back)."
+      quiz = {
+        question: "¿Se escribirá en un registro?",
+        options: ["Sí", "No"],
+        answer: "Sí",
+        explanation: "El resultado final se escribe de vuelta en un registro interno."
       };
+      break;
   }
+  
+  if (quiz) quizTracker.count++;
+  return quiz;
 }
 
 function generateDecisionFlow(signals: any): DecisionFlow[] {
   return [
-    { question: "Needs to compute something (ALU)?", answer: signals.ALUSrc || signals.ALUOp !== "PASS" ? "YES" : "NO" },
-    { question: "Reads from memory?", answer: signals.MemRead ? "YES" : "NO" },
-    { question: "Writes to memory?", answer: signals.MemWrite ? "YES" : "NO" },
-    { question: "Updates a register?", answer: signals.RegWrite ? "YES" : "NO" },
+    { question: "¿Calcula operaciones en ALU?", answer: signals.ALUSrc || signals.ALUOp !== "PASS" ? "SÍ" : "NO" },
+    { question: "¿Lee de memoria?", answer: signals.MemRead ? "SÍ" : "NO" },
+    { question: "¿Escribe en memoria?", answer: signals.MemWrite ? "SÍ" : "NO" },
+    { question: "¿Modifica un registro?", answer: signals.RegWrite ? "SÍ" : "NO" },
   ];
 }
 
-function toRiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
+function toRiscSteps(timeline: TimelineCycle[], quizTracker: { count: number }): GuidedStep[] {
   const steps: GuidedStep[] = [];
   let localState: CPUStateMap = {};
   
@@ -196,7 +198,7 @@ function toRiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
         focusComponent: event.component,
         pathLabel: pathLabelForRisc(stage, event),
         rawEvent: event,
-        quiz: generateQuizForRiscStage(stage),
+        quiz: generateQuizForRiscStage(stage, quizTracker),
         decisionFlow: generateDecisionFlow(control),
         beforeState,
         afterState: { ...localState },
@@ -208,7 +210,7 @@ function toRiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
   return steps;
 }
 
-function toCiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
+function toCiscSteps(timeline: TimelineCycle[], quizTracker: { count: number }): GuidedStep[] {
   const steps: GuidedStep[] = [];
   let localState: CPUStateMap = {};
 
@@ -227,7 +229,27 @@ function toCiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
     }
     
     const isLastMicro = micro.meta?.micro_op_index === micro.meta?.total_micro_ops;
+    const isFirstMicro = micro.meta?.micro_op_index === 1;
+    let ciscQuiz: Quiz | undefined;
     
+    if (isFirstMicro && quizTracker.count < 2) {
+      ciscQuiz = {
+        question: "¿En qué divide CISC las instrucciones complejas?",
+        options: ["Micro-operaciones", "Bucles de software", "Hardware directo"],
+        answer: "Micro-operaciones",
+        explanation: "CISC usa secuencias más pequeñas llamadas micro-operaciones."
+      };
+      quizTracker.count++;
+    } else if (isLastMicro && quizTracker.count < 2) {
+      ciscQuiz = {
+        question: "¿Se escribirá en un registro al finalizar?",
+        options: ["Sí", "No"],
+        answer: micro.component === "REGISTERS" && micro.action.includes("WRITE") ? "Sí" : "No",
+        explanation: "Si la operación era aritmética o de carga, termina escribiendo su valor allí."
+      };
+      quizTracker.count++;
+    }
+
     steps.push({
       cycle: cycle.cycle,
       instruction,
@@ -239,16 +261,11 @@ function toCiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
         MemWrite: micro.action.includes("WRITE") ? 1 : 0,
         ALUSrc: micro.component === "ALU" ? 1 : 0,
       },
-      narration: `Deep inside the instruction, the CISC Control Unit is executing micro-operation: ${micro.action}. Notice how one CISC instruction breaks down into many steps!`,
+      narration: `En lo profundo de la instrucción, la Unidad de Control CISC ejecuta la micro-operación: ${micro.action}. ¡Nota cómo una instrucción CISC se divide en muchos pasos!`,
       focusComponent: focus,
       pathLabel: mar ? `MAR <- ${mar}, ${getInternalBusText(micro)}` : getInternalBusText(micro),
       rawEvent: micro,
-      quiz: {
-        question: "CISC breaks down complex instructions into:",
-        options: ["Many simple micro-operations", "One gigantic hardware operation", "Software loops"],
-        answer: "Many simple micro-operations",
-        explanation: "To execute complex instructions, CISC processors use a 'microcode' engine that runs smaller, sequence-based internal micro-ops."
-      },
+      quiz: ciscQuiz,
       decisionFlow: generateDecisionFlow({ RegWrite: micro.component === "REGISTERS", MemRead: micro.action.includes("READ"), MemWrite: micro.action.includes("WRITE"), ALUSrc: micro.component === "ALU" }),
       beforeState,
       afterState: { ...localState },
@@ -265,5 +282,6 @@ function toCiscSteps(timeline: TimelineCycle[]): GuidedStep[] {
 }
 
 export function buildGuidedSteps(arch: "risc" | "cisc", timeline: TimelineCycle[]): GuidedStep[] {
-  return arch === "risc" ? toRiscSteps(timeline) : toCiscSteps(timeline);
+  const tracker = { count: 0 };
+  return arch === "risc" ? toRiscSteps(timeline, tracker) : toCiscSteps(timeline, tracker);
 }

@@ -14,6 +14,7 @@ interface SimState {
   playing: boolean;
   speed: number; // 1, 2, 4, 8
   learningMode: boolean;
+  isPausedForQuestion: boolean;
 
   // Actions
   setCode: (code: string) => void;
@@ -26,6 +27,7 @@ interface SimState {
   setPlaying: (v: boolean) => void;
   setSpeed: (s: number) => void;
   setLearningMode: (v: boolean) => void;
+  setIsPausedForQuestion: (v: boolean) => void;
   stepForward: () => void;
   resetPlayback: () => void;
 }
@@ -48,6 +50,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   playing: false,
   speed: 1,
   learningMode: true,
+  isPausedForQuestion: false,
 
   setCode: (code) => set({ code }),
   setPipeline: (pipeline) => set({ pipeline }),
@@ -62,15 +65,16 @@ export const useSimStore = create<SimState>((set, get) => ({
   setPlaying: (playing) => set({ playing }),
   setSpeed: (speed) => set({ speed }),
   setLearningMode: (learningMode) => set({ learningMode }),
+  setIsPausedForQuestion: (isPausedForQuestion) => set({ isPausedForQuestion }),
   stepForward: () => {
     const { result, activeArch, currentCycle } = get();
     if (!result) return;
     const timeline = result[activeArch]?.timeline ?? [];
     if (currentCycle < timeline.length - 1) {
-      set({ currentCycle: currentCycle + 1 });
+      set({ currentCycle: currentCycle + 1, isPausedForQuestion: false });
     } else {
-      set({ playing: false });
+      set({ playing: false, isPausedForQuestion: false });
     }
   },
-  resetPlayback: () => set({ currentCycle: 0, playing: false }),
+  resetPlayback: () => set({ currentCycle: 0, playing: false, isPausedForQuestion: false }),
 }));

@@ -12,29 +12,32 @@ import { BeforeAfterPanel } from "@/components/diagram/BeforeAfterPanel";
 import { InstructionSummaryPanel } from "@/components/diagram/InstructionSummaryPanel";
 
 export function DiagramTab() {
-  const { result, activeArch, playing, learningMode, setLearningMode } = useSimStore();
+  const { result, activeArch, playing, speed, learningMode, setLearningMode, isPausedForQuestion, setIsPausedForQuestion } = useSimStore();
   const { setPlaying, resetPlayback, setActiveArch, setCurrentCycle } = useSimStore();
   const intervalRef = useRef<number | null>(null);
   const [guidedIndex, setGuidedIndex] = useState(0);
-  const [predictionAnswered, setPredictionAnswered] = useState(false);
 
   const timeline = result?.[activeArch]?.timeline || [];
   const steps = useMemo(() => buildGuidedSteps(activeArch, timeline), [activeArch, timeline]);
   const currentStep = steps[guidedIndex];
 
+  // Pause automatically if learningMode is on and a quiz is active
+  useEffect(() => {
+    if (learningMode && currentStep?.quiz && playing) {
+       setIsPausedForQuestion(true);
+    }
+  }, [guidedIndex, currentStep, learningMode, playing, setIsPausedForQuestion]);
+
   useEffect(() => {
     setGuidedIndex(0);
     setCurrentCycle(0);
     setPlaying(false);
-    setPredictionAnswered(false);
-  }, [activeArch, timeline.length, setCurrentCycle, setPlaying]);
+    setIsPausedForQuestion(false);
+  }, [activeArch, timeline.length, setCurrentCycle, setPlaying, setIsPausedForQuestion]);
 
   useEffect(() => {
-    setPredictionAnswered(false);
-  }, [guidedIndex]);
-
-  useEffect(() => {
-    if (playing && steps.length > 0) {
+    if (playing && steps.length > 0 && !isPausedForQuestion) {
+      const delay = 4000 / speed;
       intervalRef.current = window.setInterval(() => {
         setGuidedIndex((prev) => {
           const next = Math.min(prev + 1, steps.length - 1);
@@ -43,12 +46,12 @@ export function DiagramTab() {
           if (next === steps.length - 1) setPlaying(false);
           return next;
         });
-      }, 4000); // 4 seconds to allow reading the panels during auto-play
+      }, delay);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [playing, steps, timeline, setCurrentCycle, setPlaying]);
+  }, [playing, steps, timeline, setCurrentCycle, setPlaying, speed, isPausedForQuestion]);
 
   const nextStep = () => {
     setGuidedIndex((prev) => {
@@ -63,10 +66,10 @@ export function DiagramTab() {
     resetPlayback();
     setGuidedIndex(0);
     setPlaying(false);
-    setPredictionAnswered(false);
+    setIsPausedForQuestion(false);
   };
 
-  const showContent = !learningMode || playing || predictionAnswered || !currentStep?.quiz;
+  const showContent = !learningMode || !isPausedForQuestion || !currentStep?.quiz;
 
   return (
     <div className="h-full flex flex-col bg-diagram-bg">
@@ -104,10 +107,10 @@ export function DiagramTab() {
               onReset={resetSteps}
             />
 
-            {learningMode && !playing && currentStep?.quiz && !predictionAnswered && (
+            {learningMode && currentStep?.quiz && isPausedForQuestion && (
               <InteractiveQuizPanel
                 quiz={currentStep.quiz}
-                onAnswered={() => setPredictionAnswered(true)}
+                onAnswered={() => setIsPausedForQuestion(false)}
               />
             )}
 

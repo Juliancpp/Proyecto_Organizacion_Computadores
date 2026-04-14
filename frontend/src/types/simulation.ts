@@ -9,6 +9,7 @@ export interface EventMeta {
   branch_taken?: boolean;
   stall?: boolean;
   penalty_cycles?: number;
+  instruction?: string;
 }
 
 export interface SimEvent {
