@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Quiz } from "@/lib/cpu-model/guidedExecution";
+import { Brain } from "lucide-react";
 
 interface InteractiveQuizPanelProps {
   quiz?: Quiz;
@@ -28,10 +29,11 @@ export function InteractiveQuizPanel({ quiz, onAnswered }: InteractiveQuizPanelP
 
   return (
     <div className="rounded border border-primary/50 bg-primary/5 p-4 my-2 shadow-[0_0_10px_rgba(6,182,212,0.1)]">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-xl">🧠</span>
-        <h3 className="text-sm font-semibold text-primary uppercase tracker-wider">Interactive Thinking Mode</h3>
+      <div className="flex items-center gap-2 mb-1">
+        <Brain className="w-5 h-5 text-primary" />
+        <h3 className="text-sm font-semibold text-primary uppercase tracking-wider">Modo de Pensamiento Interactivo</h3>
       </div>
+      <p className="text-[10px] text-muted-foreground/60 mb-3">Piensa antes de responder — esto refuerza tu comprensión de la arquitectura.</p>
       <p className="text-sm text-foreground mb-4 font-medium">{quiz.question}</p>
       
       <div className="space-y-2">
@@ -58,10 +60,11 @@ export function InteractiveQuizPanel({ quiz, onAnswered }: InteractiveQuizPanelP
 
       {selected && (
         <div className={`mt-4 p-3 rounded text-xs leading-relaxed ${isCorrect ? 'bg-neon-green/10 text-neon-green border border-neon-green/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
-          <p className="font-semibold mb-1">{isCorrect ? '✓ Correct!' : '✗ Not quite.'}</p>
+          <p className="font-semibold mb-1">{isCorrect ? '✓ ¡Correcto!' : '✗ Incorrecto.'}</p>
           <p>{quiz.explanation}</p>
         </div>
       )}
     </div>
   );
 }
+

@@ -24,7 +24,7 @@ from simulator.parser.assembly_parser import parse_risc, parse_cisc
 from simulator.parser.transpiler import transpile_common_to_risc_cisc
 from simulator.risc.engine import execute_risc
 from simulator.risc.pipeline import execute_risc_pipeline
-from simulator.cisc.engine import execute_cisc
+from simulator.cisc.engine import execute_cisc, execute_cisc_pipeline
 from simulator.metrics.calculator import (
     compare,
     compute_metrics,
@@ -96,7 +96,7 @@ class SimulateView(APIView):
         # ------ CISC simulation ------
         if cisc_code:
             try:
-                cisc_result = self._run_cisc(cisc_code, step_mode, cisc_tcycle)
+                cisc_result = self._run_cisc(cisc_code, step_mode, use_pipeline, cisc_tcycle)
                 response_data["cisc"] = cisc_result
             except SimulatorError as exc:
                 errors["cisc"] = str(exc)
@@ -135,21 +135,24 @@ class SimulateView(APIView):
         ic = count_executed_instructions(state)
         metrics = compute_metrics(state, ic, tcycle)
         return {
-            "timeline": state.timeline,
+            "timeline": [s.to_dict() for s in state.timeline],
             "metrics": metrics.to_dict(),
             "final_state": state.snapshot(),
             "parsed_instructions": parsed.to_dict(),
         }
 
     @staticmethod
-    def _run_cisc(code: str, step: bool, tcycle: float) -> dict:
+    def _run_cisc(code: str, step: bool, pipeline: bool, tcycle: float) -> dict:
         parsed = parse_cisc(code)
         state = CPUState()
-        state = execute_cisc(parsed, state, step=step)
+        if pipeline:
+            state = execute_cisc_pipeline(parsed, state)
+        else:
+            state = execute_cisc(parsed, state, step=step)
         ic = count_executed_instructions(state)
         metrics = compute_metrics(state, ic, tcycle)
         return {
-            "timeline": state.timeline,
+            "timeline": [s.to_dict() for s in state.timeline],
             "metrics": metrics.to_dict(),
             "final_state": state.snapshot(),
             "parsed_instructions": parsed.to_dict(),
@@ -217,7 +220,7 @@ class SimulateRISCView(APIView):
             metrics = compute_metrics(state, ic, risc_tcycle)
 
             return Response({
-                "timeline": state.timeline,
+                "timeline": [s.to_dict() for s in state.timeline],
                 "metrics": metrics.to_dict(),
                 "final_state": state.snapshot(),
                 "parsed_instructions": parsed.to_dict(),
@@ -245,18 +248,22 @@ class SimulateCISCView(APIView):
         data = serializer.validated_data
         code = data["code"]
         step_mode = data["step"]
+        use_pipeline = data["pipeline"]
         cisc_tcycle = data.get("cisc_tcycle", DEFAULT_CISC_TCYCLE_NS)
 
         try:
             parsed = parse_cisc(code)
             state = CPUState()
-            state = execute_cisc(parsed, state, step=step_mode)
+            if use_pipeline:
+                state = execute_cisc_pipeline(parsed, state)
+            else:
+                state = execute_cisc(parsed, state, step=step_mode)
 
             ic = count_executed_instructions(state)
             metrics = compute_metrics(state, ic, cisc_tcycle)
 
             return Response({
-                "timeline": state.timeline,
+                "timeline": [s.to_dict() for s in state.timeline],
                 "metrics": metrics.to_dict(),
                 "final_state": state.snapshot(),
                 "parsed_instructions": parsed.to_dict(),

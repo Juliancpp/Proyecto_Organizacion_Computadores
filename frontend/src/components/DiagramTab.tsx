@@ -10,9 +10,10 @@ import { InteractiveQuizPanel } from "@/components/diagram/InteractiveQuizPanel"
 import { DecisionFlowPanel } from "@/components/diagram/DecisionFlowPanel";
 import { BeforeAfterPanel } from "@/components/diagram/BeforeAfterPanel";
 import { InstructionSummaryPanel } from "@/components/diagram/InstructionSummaryPanel";
+import { GraduationCap } from "lucide-react";
 
 export function DiagramTab() {
-  const { result, activeArch, playing, speed, learningMode, setLearningMode, isPausedForQuestion, setIsPausedForQuestion } = useSimStore();
+  const { result, activeArch, playing, speed, learningMode, setLearningMode, isPausedForQuestion, setIsPausedForQuestion, pipeline } = useSimStore();
   const { setPlaying, resetPlayback, setActiveArch, setCurrentCycle } = useSimStore();
   const intervalRef = useRef<number | null>(null);
   const [guidedIndex, setGuidedIndex] = useState(0);
@@ -76,17 +77,21 @@ export function DiagramTab() {
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {!result ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm font-mono">
-            Run a simulation to see the didactic diagram
+            Ejecuta una simulación para ver el diagrama didáctico
           </div>
         ) : (
           <div className="max-w-6xl mx-auto space-y-4">
-            <div className="flex justify-between items-center bg-card p-2 rounded border border-border shadow-sm">
-              <ModeSwitcher
-                activeArch={activeArch}
-                setActiveArch={setActiveArch}
-                riscAvailable={Boolean(result?.risc)}
-                ciscAvailable={Boolean(result?.cisc)}
-              />
+            <div className="flex justify-between items-center bg-card p-2 rounded border border-border shadow-sm gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <ModeSwitcher
+                  activeArch={activeArch}
+                  setActiveArch={setActiveArch}
+                  riscAvailable={Boolean(result?.risc)}
+                  ciscAvailable={Boolean(result?.cisc)}
+                />
+
+              </div>
+
               <label className="flex items-center gap-2 text-sm font-mono text-primary font-semibold mr-4 cursor-pointer hover:text-neon-cyan transition-colors">
                 <input 
                   type="checkbox" 
@@ -94,7 +99,7 @@ export function DiagramTab() {
                   onChange={(e) => setLearningMode(e.target.checked)} 
                   className="accent-primary w-4 h-4" 
                 />
-                🎓 Learning Mode
+                <GraduationCap className="w-4 h-4" /> Modo Aprendizaje
               </label>
             </div>
             
@@ -140,7 +145,12 @@ export function DiagramTab() {
 
                 {/* BOTTOM SECTION: Arquitectura Global */}
                 <div className="w-full">
-                  <CPUView activeArch={activeArch} step={currentStep} stepList={steps} />
+                  <CPUView 
+                    activeArch={activeArch} 
+                    step={currentStep} 
+                    stepList={steps} 
+                    pipelineEnabled={activeArch === "risc" || pipeline} 
+                  />
                 </div>
               </div>
 

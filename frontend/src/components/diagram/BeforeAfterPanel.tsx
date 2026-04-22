@@ -13,27 +13,27 @@ export function BeforeAfterPanel({ beforeState, afterState, operationLabel }: Be
 
   return (
     <div className="rounded border border-border bg-card p-3 my-2">
-      <div className="text-[10px] font-mono text-muted-foreground uppercase mb-2">State Transition (Cause → Effect)</div>
+      <div className="text-[10px] font-mono text-muted-foreground uppercase mb-2">Transición de Estado (Causa → Efecto)</div>
       <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center font-mono text-xs">
-        {/* BEFORE */}
+        {/* ANTES */}
         <div className="bg-black/20 p-2 rounded min-h-[60px]">
-          <div className="text-[9px] text-muted-foreground mb-1">BEFORE</div>
+          <div className="text-[9px] text-muted-foreground mb-1">ANTES</div>
           {allKeys.map(k => (
             <div key={k} className="text-foreground/80">{k} = {beforeState[k] ?? "?"}</div>
           ))}
         </div>
 
-        {/* OPERATION TRANSITION */}
+        {/* OPERACIÓN */}
         <div className="flex flex-col items-center justify-center text-primary/80">
           <span className="text-[10px] bg-primary/10 px-2 py-1 rounded-full mb-1 border border-primary/20">
-            {operationLabel || "Updating"}
+            {operationLabel || "Actualizando"}
           </span>
           <span>→</span>
         </div>
 
-        {/* AFTER */}
+        {/* DESPUÉS */}
         <div className="bg-black/20 p-2 rounded min-h-[60px]">
-          <div className="text-[9px] text-muted-foreground mb-1">AFTER</div>
+          <div className="text-[9px] text-muted-foreground mb-1">DESPUÉS</div>
           {allKeys.map(k => {
             const changed = beforeState[k] !== afterState[k];
             return (

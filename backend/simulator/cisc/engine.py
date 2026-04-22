@@ -85,10 +85,20 @@ def execute_cisc(
 
         instr = instructions[state.pc]
 
-        # Decompose into µ-ops
+        # ── Fetch / Decode cycle (1 cycle) ──
+        state.new_cycle()
         micro_ops = _decompose(state, instr, labels)
+        state.add_event(Event(
+            component=Component.CONTROL.value,
+            action=f"FETCH+DECODE: '{instr.raw.strip()}' → {len(micro_ops)} µ-ops",
+            inputs=[state.pc],
+            output=f"{instr.opcode} decoded",
+            meta={"instruction": instr.opcode, "micro_op": True,
+                  "micro_op_index": 0, "total_micro_ops": len(micro_ops)},
+        ))
+        state.end_cycle()
 
-        # Execute each µ-op as one cycle
+        # ── Execute each µ-op as one cycle ──
         for uop in micro_ops:
             if state.cycles >= MAX_CYCLES:
                 raise ExecutionError("Maximum cycle count exceeded during µ-op execution", state.pc)
@@ -113,6 +123,143 @@ def execute_cisc(
 
         if step:
             break
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# CISC Pipeline Execution
+# ---------------------------------------------------------------------------
+
+def execute_cisc_pipeline(
+    parse_result: ParseResult,
+    state: CPUState | None = None,
+) -> CPUState:
+    """
+    Execute a parsed CISC program with µ-op overlap pipelining.
+
+    FIXED FORMULA (Task 1):
+    ─────────────────────────────────────────────────────────────────────
+    Sequential model:
+        total_cycles_seq = Σ (µops_i + overhead_i)
+        where overhead_i = 1 (fetch/decode cycle per instruction)
+
+    Pipelined model:
+        total_cycles_pipe ≈ Σ (µops_i) + pipeline_fill_cost
+        where pipeline_fill_cost = NUM_STAGES - 1  (here: 1, since we
+        overlap fetch/decode of instruction i+1 with the last µ-op of
+        instruction i, saving one cycle per instruction boundary).
+
+    Savings = (K - 1) cycles, where K = number of instructions.
+    This is proportional to µ-op overlap, NOT just instruction count.
+
+    Concrete example (3 instructions: 2µ, 2µ, 4µ):
+        Sequential:  (1+2) + (1+2) + (1+4) = 11 cycles
+        Pipelined:   (2 + 2 + 4) + 1       =  9 cycles  (saved 2)
+    ─────────────────────────────────────────────────────────────────────
+
+    Implementation:
+      - Each µ-op executes in its own cycle (correctness preserved).
+      - On the LAST µ-op of instruction i, the fetch/decode of instruction
+        i+1 is overlapped in the SAME cycle (no extra cycle consumed).
+      - This eliminates the 1-cycle fetch/decode overhead at every
+        instruction boundary except the very first one.
+    """
+    instructions = parse_result.instructions
+    labels = parse_result.labels
+
+    if state is None:
+        state = CPUState()
+
+    if not instructions:
+        return state
+
+    # ── Pipeline fill: fetch/decode the first instruction (1 cycle) ──
+    # This is the unavoidable pipeline_fill_cost = NUM_STAGES - 1 = 1.
+    first_instr = instructions[0]
+    state.new_cycle()
+    state.add_event(Event(
+        component=Component.CONTROL.value,
+        action=f"PIPE-FILL: FETCH+DECODE '{first_instr.raw.strip()}'",
+        inputs=[0],
+        output=f"{first_instr.opcode} decoded",
+        meta={
+            "instruction": first_instr.opcode,
+            "micro_op": True,
+            "micro_op_index": 0,
+            "total_micro_ops": 0,
+            "pipeline_phase": "FILL",
+        },
+    ))
+    state.end_cycle()
+
+    instr_idx: int = 0
+
+    while not state.halted and instr_idx < len(instructions):
+        if state.cycles >= MAX_CYCLES:
+            raise ExecutionError("Maximum cycle count exceeded (CISC pipeline)", instr_idx)
+
+        instr = instructions[instr_idx]
+
+        # Decompose into µ-ops (captures current state values for descriptions)
+        micro_ops = _decompose(state, instr, labels)
+        total_uops = len(micro_ops)
+
+        for uop_idx, uop in enumerate(micro_ops):
+            if state.cycles >= MAX_CYCLES:
+                raise ExecutionError("Maximum cycle count exceeded during µ-op execution", instr_idx)
+
+            state.new_cycle()
+
+            # Execute the µ-op's side-effect
+            if uop.execute is not None:
+                uop.execute(state)
+
+            # Record the µ-op event
+            state.add_event(Event(
+                component=uop.component,
+                action=uop.action,
+                inputs=uop.inputs,
+                output=uop.output,
+                meta={**uop.meta, "instruction": instr.opcode, "micro_op": True,
+                      "pipeline_phase": "EXECUTE"},
+            ))
+
+            # ── Overlap: on the LAST µ-op, prefetch the next instruction ──
+            # This is the key savings: the fetch/decode of instruction i+1
+            # happens in the SAME cycle as the last µ-op of instruction i,
+            # so no extra cycle is consumed at the boundary.
+            is_last_uop = (uop_idx == total_uops - 1)
+            next_instr_idx = instr_idx + 1
+            if instr.opcode in ("BEQ", "JMP"):
+                # For branches, the µ-op already updated state.pc
+                next_instr_idx = state.pc
+
+            if (is_last_uop
+                    and not state.halted
+                    and next_instr_idx < len(instructions)):
+                next_instr = instructions[next_instr_idx]
+                state.add_event(Event(
+                    component=Component.CONTROL.value,
+                    action=f"PIPE-OVERLAP: FETCH+DECODE '{next_instr.raw.strip()}'",
+                    inputs=[next_instr_idx],
+                    output=f"{next_instr.opcode} decoded (overlapped)",
+                    meta={
+                        "instruction": next_instr.opcode,
+                        "micro_op": True,
+                        "micro_op_index": 0,
+                        "total_micro_ops": 0,
+                        "pipeline_phase": "OVERLAP",
+                    },
+                ))
+
+            state.end_cycle()
+
+        # Advance to next instruction
+        if instr.opcode not in ("BEQ", "JMP"):
+            instr_idx += 1
+        else:
+            instr_idx = state.pc
 
     return state
 

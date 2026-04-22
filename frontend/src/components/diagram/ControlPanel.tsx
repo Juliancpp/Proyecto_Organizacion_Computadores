@@ -13,17 +13,17 @@ export function ControlPanel({ isPlaying, canStep, cycle, onNextStep, onTogglePl
       <button
         onClick={onNextStep}
         disabled={!canStep}
-        className="px-2 py-1 rounded text-xs font-mono bg-primary/20 text-primary disabled:opacity-40"
+        className="px-3 py-1.5 rounded text-sm font-mono bg-primary/20 text-primary disabled:opacity-40 hover:bg-primary/30 transition-colors"
       >
-        ▶ Next Step
+        ▶ Siguiente Paso
       </button>
-      <button onClick={onTogglePlay} className="px-2 py-1 rounded text-xs font-mono bg-secondary text-foreground">
-        {isPlaying ? "⏸ Pause" : "▶ Auto"}
+      <button onClick={onTogglePlay} className="px-3 py-1.5 rounded text-sm font-mono bg-secondary text-foreground hover:bg-secondary/80 transition-colors">
+        {isPlaying ? "⏸ Pausar" : "▶ Auto"}
       </button>
-      <button onClick={onReset} className="px-2 py-1 rounded text-xs font-mono bg-secondary text-foreground">
-        Reset
+      <button onClick={onReset} className="px-3 py-1.5 rounded text-sm font-mono bg-secondary text-foreground hover:bg-secondary/80 transition-colors">
+        Reiniciar
       </button>
-      <div className="ml-auto text-xs font-mono text-neon-amber">Clock: Cycle {cycle}</div>
+      <div className="ml-auto text-sm font-mono text-neon-amber font-semibold">Reloj: Ciclo {cycle}</div>
     </div>
   );
 }

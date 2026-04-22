@@ -119,6 +119,25 @@ def compute_metrics(
     """
     Compute performance metrics from a completed simulation.
 
+    FIXED FORMULA (Task 1):
+    ─────────────────────────────────────────────────────────────────────
+    CPU Time = total_cycles × T_cycle
+
+    Where total_cycles is taken directly from the CPUState (the ground
+    truth of what the simulator actually ran), NOT recomputed as IC×CPI.
+
+    The old formula  cpu_time_ns = IC × CPI × T_cycle  is algebraically
+    equivalent to  total_cycles × T_cycle  only when CPI = total/IC, but
+    it obscures the pipeline savings because it re-derives cycles from IC
+    instead of using the actual simulated cycle count.
+
+    For the CISC pipeline model:
+        total_cycles_pipe ≈ Σ(µops_i) + pipeline_fill_cost
+    This is already captured in state.cycles after execute_cisc_pipeline().
+
+    CPI is still reported as a diagnostic ratio (total_cycles / IC).
+    ─────────────────────────────────────────────────────────────────────
+
     Args:
         state:              The CPUState after execution.
         instruction_count:  Number of instructions that were executed
@@ -130,7 +149,8 @@ def compute_metrics(
     """
     total_cycles = state.cycles
     cpi = total_cycles / instruction_count if instruction_count > 0 else 0.0
-    cpu_time_ns = instruction_count * cpi * t_cycle_ns
+    # Use total_cycles directly — this reflects actual pipeline savings
+    cpu_time_ns = total_cycles * t_cycle_ns
     cpu_time_us = cpu_time_ns / 1_000.0
 
     return Metrics(
@@ -189,12 +209,16 @@ def count_executed_instructions(state: CPUState) -> int:
     - RISC single-issue:  events with "DECODE instruction" in action
     - RISC pipeline:      events with pipeline_stage == "IF" (each IF = 1 new instruction)
     - CISC micro-ops:     events with micro_op_index == 1 (first µ-op of instruction)
+
+    NOTE (Task 2): timeline is now List[CPUSnapshot]; each snapshot exposes
+    its events as a tuple of dicts via snapshot.events.
     """
     ic = 0
-    seen_pipeline_instructions: set[int] = set()  # track by instruction_index for pipeline
+    seen_pipeline_instructions: set[int] = set()
 
-    for record in state.timeline:
-        for event in record.get("events", []):
+    for snapshot in state.timeline:
+        # snapshot.events is a tuple[dict, ...] (immutable, from CPUSnapshot)
+        for event in snapshot.events:
             action = event.get("action", "")
             meta = event.get("meta", {})
 
