@@ -1,14 +1,18 @@
-import { Play, Pause, SkipForward, Trash2, Zap, RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { Play, Pause, SkipForward, Trash2, Zap, RotateCcw, Hash } from "lucide-react";
 import { useSimStore } from "@/store/simulationStore";
 import { simulate } from "@/lib/api";
 import { motion } from "framer-motion";
 
 export function Toolbar() {
   const {
-    code, pipeline, loading, playing, speed, result,
+    code, pipeline, loading, playing, speed, result, inputValues,
     setPipeline, setResult, setLoading, setError,
-    setPlaying, setSpeed, stepForward, resetPlayback, setCode,
+    setPlaying, setSpeed, stepForward, resetPlayback, setCode, setInputValues,
   } = useSimStore();
+
+  const [showInputs, setShowInputs] = useState(false);
+  const [inputText, setInputText] = useState("");
 
   const handleRun = async () => {
     setLoading(true);
@@ -21,6 +25,7 @@ export function Toolbar() {
         transpile: true,
         risc_tcycle: 1.0,
         cisc_tcycle: 1.5,
+        input_values: inputValues,
       });
       setResult(res);
       if (res.errors) {
@@ -36,10 +41,19 @@ export function Toolbar() {
     }
   };
 
+  const handleInputCommit = () => {
+    const vals = inputText
+      .split(/[\s,]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n));
+    setInputValues(vals);
+    setShowInputs(false);
+  };
+
   const speeds = [1, 2, 4, 8];
 
   return (
-    <div className="flex items-center gap-1 px-3 py-2 bg-card border-b border-border">
+    <div className="flex flex-wrap items-center gap-1 px-3 py-2 bg-card border-b border-border">
       <div className="flex items-center gap-1 mr-2">
         <span className="text-xs font-mono text-primary font-bold tracking-wider mr-2">
           RISC vs CISC Lab
@@ -89,6 +103,48 @@ export function Toolbar() {
 
       <div className="h-5 w-px bg-border mx-1" />
 
+      {/* READ inputs button */}
+      <button
+        onClick={() => {
+          setInputText(inputValues.join(", "));
+          setShowInputs((v) => !v);
+        }}
+        className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-mono transition-all ${
+          inputValues.length > 0
+            ? "bg-primary/20 text-primary border border-primary/40"
+            : "bg-secondary text-muted-foreground border border-border hover:text-foreground"
+        }`}
+        title="Set READ input values"
+      >
+        <Hash className="w-3 h-3" />
+        Inputs{inputValues.length > 0 ? ` (${inputValues.length})` : ""}
+      </button>
+
+      {showInputs && (
+        <div className="flex items-center gap-1">
+          <input
+            autoFocus
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleInputCommit();
+              if (e.key === "Escape") setShowInputs(false);
+            }}
+            placeholder="e.g. 5, 10, 3"
+            className="px-2 py-0.5 rounded text-xs font-mono bg-background border border-border text-foreground w-36 focus:outline-none focus:border-primary"
+          />
+          <button
+            onClick={handleInputCommit}
+            className="px-2 py-0.5 rounded text-xs font-mono bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30 transition-colors"
+          >
+            OK
+          </button>
+        </div>
+      )}
+
+      <div className="h-5 w-px bg-border mx-1" />
+
       <div className="flex items-center gap-0.5">
         {speeds.map((s) => (
           <button
@@ -110,7 +166,6 @@ export function Toolbar() {
       <ToolbarButton onClick={resetPlayback} disabled={!result} title="Reset">
         <RotateCcw className="w-3.5 h-3.5" />
       </ToolbarButton>
-
     </div>
   );
 }

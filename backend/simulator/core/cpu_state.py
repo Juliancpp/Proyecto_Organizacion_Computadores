@@ -102,6 +102,14 @@ class CPUState:
         self.current_instruction: str = ""
         self.control_signals: dict[str, Any] = {}
 
+        # ── Program output log ──
+        # Each entry: {"cycle": int, "type": "register"|"memory"|"string", "value": str}
+        self.output_log: list[dict[str, Any]] = []
+
+        # ── Pending READ inputs (pre-supplied by the API caller) ──
+        # List of integer values to consume when READ instructions execute.
+        self.input_queue: list[int] = []
+
         # ── Immutable timeline: List[CPUSnapshot] ──
         # Each entry is a frozen snapshot produced by end_cycle().
         self.timeline: list[CPUSnapshot] = []
@@ -262,7 +270,24 @@ class CPUState:
         self.halted = False
         self.current_instruction = ""
         self.control_signals = {}
+        self.output_log.clear()
+        self.input_queue.clear()
         logger.info("CPU state reset")
+
+    def emit_output(self, entry_type: str, value: str, label: str = "") -> None:
+        """Append a program output entry (called by PRINT/PRINT_MEM/PRINT_STR handlers)."""
+        self.output_log.append({
+            "cycle": self.cycles,
+            "type": entry_type,
+            "value": value,
+            "label": label,
+        })
+
+    def consume_input(self) -> int:
+        """Pop the next value from the input queue (for READ instruction)."""
+        if self.input_queue:
+            return self.input_queue.pop(0)
+        return 0  # default when no input supplied
 
     def snapshot(self) -> dict[str, Any]:
         """Return a plain-dict snapshot of the current live working state."""
@@ -272,6 +297,7 @@ class CPUState:
             "memory": dict(self.memory),
             "cycles": self.cycles,
             "halted": self.halted,
+            "output_log": list(self.output_log),
         }
 
     def clone(self) -> "CPUState":

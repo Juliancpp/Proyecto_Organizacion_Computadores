@@ -75,6 +75,22 @@ class SimulationRequestSerializer(serializers.Serializer):
         min_value=0.01,
         help_text="CISC clock period in nanoseconds.",
     )
+    simulation_mode = serializers.ChoiceField(
+        choices=["functional", "microarchitectural"],
+        required=False,
+        default="microarchitectural",
+        help_text=(
+            "Simulation level. "
+            "'functional': only final state matters, no pipeline internals. "
+            "'microarchitectural': full cycle-by-cycle timeline with pipeline stages and control signals."
+        ),
+    )
+    input_values = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        default=list,
+        help_text="Integer values to supply to READ instructions in order.",
+    )
 
     def validate(self, attrs):
         code = attrs.get("code", "").strip()
@@ -99,6 +115,21 @@ class SingleArchRequestSerializer(serializers.Serializer):
     pipeline = serializers.BooleanField(required=False, default=False)
     risc_tcycle = serializers.FloatField(required=False, default=1.0, min_value=0.01)
     cisc_tcycle = serializers.FloatField(required=False, default=1.5, min_value=0.01)
+    simulation_mode = serializers.ChoiceField(
+        choices=["functional", "microarchitectural"],
+        required=False,
+        default="microarchitectural",
+        help_text=(
+            "'functional': only final state, no timeline. "
+            "'microarchitectural': full cycle-by-cycle timeline."
+        ),
+    )
+    input_values = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        default=list,
+        help_text="Integer values to supply to READ instructions in order.",
+    )
 
 
 # ---------------------------------------------------------------------------

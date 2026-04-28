@@ -118,7 +118,7 @@ def execute_cisc(
             state.end_cycle()
 
         # Advance PC (unless branch/jump already set it)
-        if instr.opcode not in ("BEQ", "JMP"):
+        if instr.opcode not in ("BEQ", "BNE", "JMP"):
             state.pc += 1
 
         if step:
@@ -231,7 +231,7 @@ def execute_cisc_pipeline(
             # so no extra cycle is consumed at the boundary.
             is_last_uop = (uop_idx == total_uops - 1)
             next_instr_idx = instr_idx + 1
-            if instr.opcode in ("BEQ", "JMP"):
+            if instr.opcode in ("BEQ", "BNE", "JMP"):
                 # For branches, the µ-op already updated state.pc
                 next_instr_idx = state.pc
 
@@ -256,7 +256,7 @@ def execute_cisc_pipeline(
             state.end_cycle()
 
         # Advance to next instruction
-        if instr.opcode not in ("BEQ", "JMP"):
+        if instr.opcode not in ("BEQ", "BNE", "JMP"):
             instr_idx += 1
         else:
             instr_idx = state.pc
@@ -295,12 +295,22 @@ def _decompose(
         return _decompose_inc_dec(state, ops, "DEC", lambda v: v - 1)
     elif opcode == "BEQ":
         return _decompose_beq(state, ops, labels)
+    elif opcode == "BNE":
+        return _decompose_bne(state, ops, labels)
     elif opcode == "JMP":
         return _decompose_jmp(state, ops, labels)
     elif opcode == "HALT":
         return _decompose_halt(state)
     elif opcode == "NOP":
         return _decompose_nop()
+    elif opcode == "PRINT":
+        return _decompose_print(state, ops)
+    elif opcode == "PRINT_MEM":
+        return _decompose_print_mem(state, ops)
+    elif opcode == "PRINT_STR":
+        return _decompose_print_str(state, ops)
+    elif opcode == "READ":
+        return _decompose_read(state, ops)
     else:
         raise InvalidInstructionError(f"Unknown CISC opcode '{opcode}'", instr.line_number)
 
@@ -582,6 +592,85 @@ def _decompose_beq(
 
 
 # ---------------------------------------------------------------------------
+# BNE [addr1], [addr2], label  →  4 µ-ops (branch not-equal)
+# ---------------------------------------------------------------------------
+
+def _decompose_bne(
+    state: CPUState,
+    ops: list[Any],
+    labels: dict[str, int],
+) -> list[MicroOp]:
+    """
+    BNE: branch if MEM[addr1] != MEM[addr2].
+
+    Semantics: if MEM[addr1] != MEM[addr2] then PC ← labels[label]
+               else PC ← PC + 1
+
+    Symmetric to BEQ but with inverted condition.
+    """
+    addr1, addr2, label = ops
+    val1 = state.read_memory(addr1)
+    val2 = state.read_memory(addr2)
+    taken = val1 != val2
+
+    if label not in labels:
+        raise ExecutionError(f"Undefined label '{label}'", state.pc)
+
+    target = labels[label]
+
+    micro_ops = [
+        MicroOp(
+            component=Component.MEMORY.value,
+            action=f"READ MEM[{addr1}]",
+            inputs=[addr1],
+            output=val1,
+            meta={"micro_op_index": 1, "total_micro_ops": 4, "address": addr1},
+        ),
+        MicroOp(
+            component=Component.MEMORY.value,
+            action=f"READ MEM[{addr2}]",
+            inputs=[addr2],
+            output=val2,
+            meta={"micro_op_index": 2, "total_micro_ops": 4, "address": addr2},
+        ),
+        MicroOp(
+            component=Component.ALU.value,
+            action=f"COMPARE {val1} != {val2} → {'NOT_EQUAL' if taken else 'EQUAL'}",
+            inputs=[val1, val2],
+            output=taken,
+            meta={"micro_op_index": 3, "total_micro_ops": 4, "comparison": "BNE"},
+        ),
+    ]
+
+    if taken:
+        def _branch_taken(s: CPUState, t: int = target) -> None:
+            s.pc = t
+
+        micro_ops.append(MicroOp(
+            component=Component.PC.value,
+            action=f"BRANCH TAKEN: PC ← {target} (label '{label}')",
+            inputs=[state.pc, label],
+            output=target,
+            meta={"micro_op_index": 4, "total_micro_ops": 4, "branch_taken": True},
+            execute=_branch_taken,
+        ))
+    else:
+        def _branch_not_taken(s: CPUState) -> None:
+            s.pc += 1
+
+        micro_ops.append(MicroOp(
+            component=Component.PC.value,
+            action=f"BRANCH NOT TAKEN: PC ← {state.pc + 1}",
+            inputs=[state.pc],
+            output=state.pc + 1,
+            meta={"micro_op_index": 4, "total_micro_ops": 4, "branch_taken": False},
+            execute=_branch_not_taken,
+        ))
+
+    return micro_ops
+
+
+# ---------------------------------------------------------------------------
 # JMP label  →  2 µ-ops
 # ---------------------------------------------------------------------------
 
@@ -652,5 +741,100 @@ def _decompose_nop() -> list[MicroOp]:
             inputs=[],
             output="No-op",
             meta={"micro_op_index": 1, "total_micro_ops": 1},
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# PRINT Rx  →  1 µ-op
+# ---------------------------------------------------------------------------
+
+def _decompose_print(state: CPUState, ops: list[Any]) -> list[MicroOp]:
+    rd = ops[0]
+    value = state.read_register(rd)
+
+    def _do_print(s: CPUState, r: int = rd, v: int = value) -> None:
+        s.emit_output("register", str(v), label=f"R{r}")
+
+    return [
+        MicroOp(
+            component=Component.CONTROL.value,
+            action=f"PRINT R{rd} = {value}",
+            inputs=[f"R{rd}"],
+            output=str(value),
+            meta={"micro_op_index": 1, "total_micro_ops": 1,
+                  "output": True, "output_type": "register"},
+            execute=_do_print,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# PRINT_MEM [addr]  →  1 µ-op
+# ---------------------------------------------------------------------------
+
+def _decompose_print_mem(state: CPUState, ops: list[Any]) -> list[MicroOp]:
+    addr = ops[0]
+    value = state.read_memory(addr)
+
+    def _do_print(s: CPUState, a: int = addr, v: int = value) -> None:
+        s.emit_output("memory", str(v), label=f"MEM[{a}]")
+
+    return [
+        MicroOp(
+            component=Component.MEMORY.value,
+            action=f"PRINT_MEM [{addr}] = {value}",
+            inputs=[addr],
+            output=str(value),
+            meta={"micro_op_index": 1, "total_micro_ops": 1,
+                  "output": True, "output_type": "memory", "address": addr},
+            execute=_do_print,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# PRINT_STR "text"  →  1 µ-op
+# ---------------------------------------------------------------------------
+
+def _decompose_print_str(state: CPUState, ops: list[Any]) -> list[MicroOp]:
+    text = ops[0]
+
+    def _do_print(s: CPUState, t: str = text) -> None:
+        s.emit_output("string", t)
+
+    return [
+        MicroOp(
+            component=Component.CONTROL.value,
+            action=f'PRINT_STR "{text}"',
+            inputs=[],
+            output=text,
+            meta={"micro_op_index": 1, "total_micro_ops": 1,
+                  "output": True, "output_type": "string"},
+            execute=_do_print,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# READ Rx  →  1 µ-op
+# ---------------------------------------------------------------------------
+
+def _decompose_read(state: CPUState, ops: list[Any]) -> list[MicroOp]:
+    rd = ops[0]
+    value = state.consume_input()
+
+    def _do_read(s: CPUState, r: int = rd, v: int = value) -> None:
+        s.write_register(r, v)
+
+    return [
+        MicroOp(
+            component=Component.REGISTERS.value,
+            action=f"READ input → R{rd} = {value}",
+            inputs=["stdin"],
+            output=value,
+            meta={"micro_op_index": 1, "total_micro_ops": 1,
+                  "input": True, "register": f"R{rd}"},
+            execute=_do_read,
         ),
     ]

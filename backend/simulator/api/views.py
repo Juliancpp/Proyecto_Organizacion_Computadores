@@ -32,6 +32,8 @@ from simulator.metrics.calculator import (
     DEFAULT_RISC_TCYCLE_NS,
     DEFAULT_CISC_TCYCLE_NS,
 )
+from simulator.x86.parser import parse_x86, is_x86_syntax
+from simulator.x86.engine import execute_x86, read_array_from_memory
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,8 @@ class SimulateView(APIView):
         use_pipeline = data["pipeline"]
         risc_tcycle = data.get("risc_tcycle", DEFAULT_RISC_TCYCLE_NS)
         cisc_tcycle = data.get("cisc_tcycle", DEFAULT_CISC_TCYCLE_NS)
+        simulation_mode = data.get("simulation_mode", "microarchitectural")
+        input_values = data.get("input_values", [])
 
         if transpile:
             if not unified_code:
@@ -87,7 +91,7 @@ class SimulateView(APIView):
         # ------ RISC simulation ------
         if risc_code:
             try:
-                risc_result = self._run_risc(risc_code, step_mode, use_pipeline, risc_tcycle)
+                risc_result = self._run_risc(risc_code, step_mode, use_pipeline, risc_tcycle, simulation_mode, input_values)
                 response_data["risc"] = risc_result
             except SimulatorError as exc:
                 errors["risc"] = str(exc)
@@ -96,7 +100,7 @@ class SimulateView(APIView):
         # ------ CISC simulation ------
         if cisc_code:
             try:
-                cisc_result = self._run_cisc(cisc_code, step_mode, use_pipeline, cisc_tcycle)
+                cisc_result = self._run_cisc(cisc_code, step_mode, use_pipeline, cisc_tcycle, simulation_mode, input_values)
                 response_data["cisc"] = cisc_result
             except SimulatorError as exc:
                 errors["cisc"] = str(exc)
@@ -112,9 +116,19 @@ class SimulateView(APIView):
         if errors:
             response_data["errors"] = errors
 
-        if not response_data or (errors and "risc" not in response_data and "cisc" not in response_data):
+        # ------ x86-64 auto-detection ------
+        source_for_x86 = unified_code or risc_code or cisc_code
+        if source_for_x86 and is_x86_syntax(source_for_x86):
+            try:
+                x86_result = self._run_x86(source_for_x86)
+                response_data["x86"] = x86_result
+            except SimulatorError as exc:
+                errors["x86"] = str(exc)
+                logger.warning("x86-64 simulation error: %s", exc)
+
+        if not response_data or (errors and "risc" not in response_data and "cisc" not in response_data and "x86" not in response_data):
             return Response(
-                {"error": "Both simulations failed", "details": errors},
+                {"error": "All simulations failed", "details": errors},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
@@ -125,37 +139,74 @@ class SimulateView(APIView):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _run_risc(code: str, step: bool, pipeline: bool, tcycle: float) -> dict:
+    def _run_risc(code: str, step: bool, pipeline: bool, tcycle: float,
+                  simulation_mode: str = "microarchitectural",
+                  input_values: list | None = None) -> dict:
         parsed = parse_risc(code)
         state = CPUState()
+        if input_values:
+            state.input_queue = list(input_values)
         if pipeline:
             state = execute_risc_pipeline(parsed, state)
         else:
             state = execute_risc(parsed, state, step=step)
         ic = count_executed_instructions(state)
         metrics = compute_metrics(state, ic, tcycle)
+        timeline = [] if simulation_mode == "functional" else [s.to_dict() for s in state.timeline]
         return {
-            "timeline": [s.to_dict() for s in state.timeline],
+            "timeline": timeline,
             "metrics": metrics.to_dict(),
             "final_state": state.snapshot(),
             "parsed_instructions": parsed.to_dict(),
+            "simulation_mode": simulation_mode,
+            "output_log": state.output_log,
         }
 
     @staticmethod
-    def _run_cisc(code: str, step: bool, pipeline: bool, tcycle: float) -> dict:
+    def _run_cisc(code: str, step: bool, pipeline: bool, tcycle: float,
+                  simulation_mode: str = "microarchitectural",
+                  input_values: list | None = None) -> dict:
         parsed = parse_cisc(code)
         state = CPUState()
+        if input_values:
+            state.input_queue = list(input_values)
         if pipeline:
             state = execute_cisc_pipeline(parsed, state)
         else:
             state = execute_cisc(parsed, state, step=step)
         ic = count_executed_instructions(state)
         metrics = compute_metrics(state, ic, tcycle)
+        timeline = [] if simulation_mode == "functional" else [s.to_dict() for s in state.timeline]
         return {
-            "timeline": [s.to_dict() for s in state.timeline],
+            "timeline": timeline,
             "metrics": metrics.to_dict(),
             "final_state": state.snapshot(),
             "parsed_instructions": parsed.to_dict(),
+            "simulation_mode": simulation_mode,
+            "output_log": state.output_log,
+        }
+
+    @staticmethod
+    def _run_x86(code: str) -> dict:
+        parsed = parse_x86(code)
+        state = execute_x86(parsed)
+
+        # Read arrays from data symbols for output
+        arrays = {}
+        for name, sym in parsed.data_symbols.items():
+            if sym.size >= 4:
+                arrays[name] = read_array_from_memory(state, sym)
+
+        timeline = [s.to_dict() for s in state.core_state.timeline]
+
+        return {
+            "timeline": timeline,
+            "final_state": state.snapshot(),
+            "parsed_instructions": parsed.to_dict(),
+            "arrays": arrays,
+            "constants": parsed.constants,
+            "cycles": state.cycles,
+            "output_log": state.output_log,
         }
 
     @staticmethod
@@ -207,10 +258,14 @@ class SimulateRISCView(APIView):
         step_mode = data["step"]
         use_pipeline = data["pipeline"]
         risc_tcycle = data.get("risc_tcycle", DEFAULT_RISC_TCYCLE_NS)
+        simulation_mode = data.get("simulation_mode", "microarchitectural")
+        input_values = data.get("input_values", [])
 
         try:
             parsed = parse_risc(code)
             state = CPUState()
+            if input_values:
+                state.input_queue = list(input_values)
             if use_pipeline:
                 state = execute_risc_pipeline(parsed, state)
             else:
@@ -218,12 +273,15 @@ class SimulateRISCView(APIView):
 
             ic = count_executed_instructions(state)
             metrics = compute_metrics(state, ic, risc_tcycle)
+            timeline = [] if simulation_mode == "functional" else [s.to_dict() for s in state.timeline]
 
             return Response({
-                "timeline": [s.to_dict() for s in state.timeline],
+                "timeline": timeline,
                 "metrics": metrics.to_dict(),
                 "final_state": state.snapshot(),
                 "parsed_instructions": parsed.to_dict(),
+                "simulation_mode": simulation_mode,
+                "output_log": state.output_log,
             })
 
         except SimulatorError as exc:
@@ -250,10 +308,14 @@ class SimulateCISCView(APIView):
         step_mode = data["step"]
         use_pipeline = data["pipeline"]
         cisc_tcycle = data.get("cisc_tcycle", DEFAULT_CISC_TCYCLE_NS)
+        simulation_mode = data.get("simulation_mode", "microarchitectural")
+        input_values = data.get("input_values", [])
 
         try:
             parsed = parse_cisc(code)
             state = CPUState()
+            if input_values:
+                state.input_queue = list(input_values)
             if use_pipeline:
                 state = execute_cisc_pipeline(parsed, state)
             else:
@@ -261,12 +323,59 @@ class SimulateCISCView(APIView):
 
             ic = count_executed_instructions(state)
             metrics = compute_metrics(state, ic, cisc_tcycle)
+            timeline = [] if simulation_mode == "functional" else [s.to_dict() for s in state.timeline]
 
             return Response({
-                "timeline": [s.to_dict() for s in state.timeline],
+                "timeline": timeline,
                 "metrics": metrics.to_dict(),
                 "final_state": state.snapshot(),
                 "parsed_instructions": parsed.to_dict(),
+                "simulation_mode": simulation_mode,
+                "output_log": state.output_log,
+            })
+
+        except SimulatorError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+class SimulateX86View(APIView):
+    """
+    POST /api/simulate/x86/
+
+    Run the x86-64 NASM-style assembly simulation.
+    """
+
+    def post(self, request: Request) -> Response:
+        serializer = SingleArchRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"error": "Invalid request", "details": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+        code = data["code"]
+
+        try:
+            parsed = parse_x86(code)
+            state = execute_x86(parsed)
+
+            # Read arrays from data symbols for output
+            arrays = {}
+            for name, sym in parsed.data_symbols.items():
+                if sym.size >= 4:
+                    arrays[name] = read_array_from_memory(state, sym)
+
+            timeline = [s.to_dict() for s in state.core_state.timeline]
+
+            return Response({
+                "timeline": timeline,
+                "final_state": state.snapshot(),
+                "parsed_instructions": parsed.to_dict(),
+                "arrays": arrays,
+                "constants": parsed.constants,
+                "cycles": state.cycles,
+                "output_log": state.output_log,
             })
 
         except SimulatorError as exc:

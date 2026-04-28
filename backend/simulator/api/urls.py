@@ -6,7 +6,7 @@ All endpoints live under /api/ and are included from the project-level urls.py.
 
 from django.urls import path
 
-from simulator.api.views import SimulateView, SimulateRISCView, SimulateCISCView
+from simulator.api.views import SimulateView, SimulateRISCView, SimulateCISCView, SimulateX86View
 
 app_name = "simulator"
 
@@ -17,4 +17,5 @@ urlpatterns = [
     # Individual architecture endpoints
     path("simulate/risc/", SimulateRISCView.as_view(), name="simulate-risc"),
     path("simulate/cisc/", SimulateCISCView.as_view(), name="simulate-cisc"),
+    path("simulate/x86/", SimulateX86View.as_view(), name="simulate-x86"),
 ]

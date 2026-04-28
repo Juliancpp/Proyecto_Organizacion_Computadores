@@ -107,7 +107,8 @@ class CPUStateTests(TestCase):
         state.add_event(Event(Component.ALU, "test"))
         state.end_cycle()
         self.assertEqual(len(state.timeline), 1)
-        self.assertEqual(state.timeline[0]["cycle"], 1)
+        # timeline stores CPUSnapshot objects; use .cycle attribute or .to_dict()
+        self.assertEqual(state.timeline[0].cycle, 1)
 
     def test_reset(self):
         state = CPUState()
@@ -310,7 +311,9 @@ class RISCEngineTests(TestCase):
         code = "MOV R0, 5\nHALT"
         parsed = parse_risc(code)
         state = execute_risc(parsed)
-        for record in state.timeline:
+        # timeline stores CPUSnapshot objects; use .to_dict() for dict access
+        for snapshot in state.timeline:
+            record = snapshot.to_dict()
             self.assertIn("cycle", record)
             self.assertIn("events", record)
             for event in record["events"]:
@@ -336,8 +339,8 @@ class RISCEngineTests(TestCase):
         parsed = parse_risc(code)
         state = execute_risc(parsed)
         valid_components = {c.value for c in Component}
-        for record in state.timeline:
-            for event in record["events"]:
+        for snapshot in state.timeline:
+            for event in snapshot.events:
                 self.assertIn(event["component"], valid_components)
 
 
@@ -395,8 +398,8 @@ class CISCEngineTests(TestCase):
         code = "ADD [100], [200]\nHALT"
         parsed = parse_cisc(code)
         state = execute_cisc(parsed)
-        for record in state.timeline:
-            for event in record["events"]:
+        for snapshot in state.timeline:
+            for event in snapshot.events:
                 meta = event.get("meta", {})
                 if meta.get("micro_op"):
                     self.assertIn("micro_op_index", meta)

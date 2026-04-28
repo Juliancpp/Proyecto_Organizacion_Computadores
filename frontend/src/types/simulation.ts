@@ -40,12 +40,21 @@ export interface FinalState {
   memory: Record<string, number>;
   cycles: number;
   halted: boolean;
+  output_log: OutputEntry[];
+}
+
+export interface OutputEntry {
+  cycle: number;
+  type: "register" | "memory" | "string";
+  value: string;
+  label?: string;
 }
 
 export interface ArchResult {
   timeline: TimelineCycle[];
   metrics: Metrics;
   final_state: FinalState;
+  output_log: OutputEntry[];
 }
 
 export interface Comparison {
@@ -68,4 +77,5 @@ export interface SimulationRequest {
   transpile?: boolean;
   risc_tcycle: number;
   cisc_tcycle: number;
+  input_values?: number[];
 }

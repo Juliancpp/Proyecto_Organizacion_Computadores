@@ -1,0 +1,380 @@
+{
+  "_comment": "Formal ISA Specification for the RISC/CISC CPU Simulator",
+  "_version": "1.0",
+
+  "common": {
+    "registers": {
+      "count": 8,
+      "names": ["R0","R1","R2","R3","R4","R5","R6","R7"],
+      "width_bits": 32,
+      "general_purpose": true,
+      "note": "All registers are general-purpose; no dedicated zero/link register."
+    },
+    "memory": {
+      "size_bytes": 256,
+      "addressing": "byte",
+      "default_value": 0,
+      "note": "Sparse map; unwritten addresses read as 0."
+    },
+    "pc": {
+      "width_bits": 32,
+      "initial_value": 0,
+      "unit": "instruction_index",
+      "note": "PC is an instruction index, not a byte address."
+    }
+  },
+
+  "risc": {
+    "description": "Reduced Instruction Set Computer — register-to-register operations, fixed-width instructions, load/store memory model.",
+    "design_principles": [
+      "All arithmetic/logic operates on registers only (load/store architecture).",
+      "Fixed cycle cost per instruction (deterministic timing).",
+      "Simple addressing: only direct (immediate) memory addresses.",
+      "5-stage pipeline: IF → ID → EX → MEM → WB."
+    ],
+    "clock_period_ns": 1.0,
+    "pipeline_stages": ["IF","ID","EX","MEM","WB"],
+    "instructions": {
+      "LOAD": {
+        "syntax": "LOAD Rd, addr",
+        "operands": [
+          {"name": "Rd",   "type": "register", "role": "destination"},
+          {"name": "addr", "type": "immediate_address", "role": "source_address"}
+        ],
+        "semantics": "Rd ← MEM[addr]",
+        "side_effects": {"writes_register": "Rd"},
+        "cycle_cost": 2,
+        "cycle_breakdown": [
+          "Cycle 1: Decode + place address on bus",
+          "Cycle 2: Read MEM[addr], write result to Rd"
+        ]
+      },
+      "STORE": {
+        "syntax": "STORE Rs, addr",
+        "operands": [
+          {"name": "Rs",   "type": "register", "role": "source_value"},
+          {"name": "addr", "type": "immediate_address", "role": "destination_address"}
+        ],
+        "semantics": "MEM[addr] ← Rs",
+        "side_effects": {"writes_memory": "addr"},
+        "cycle_cost": 2,
+        "cycle_breakdown": [
+          "Cycle 1: Decode + read Rs + place address on bus",
+          "Cycle 2: Write Rs value to MEM[addr]"
+        ]
+      },
+      "ADD": {
+        "syntax": "ADD Rd, Rs1, Rs2",
+        "operands": [
+          {"name": "Rd",  "type": "register", "role": "destination"},
+          {"name": "Rs1", "type": "register", "role": "source_a"},
+          {"name": "Rs2", "type": "register", "role": "source_b"}
+        ],
+        "semantics": "Rd ← Rs1 + Rs2",
+        "side_effects": {"writes_register": "Rd"},
+        "cycle_cost": 1,
+        "cycle_breakdown": ["Cycle 1: Read Rs1, Rs2 → ALU add → write Rd"]
+      },
+      "SUB": {
+        "syntax": "SUB Rd, Rs1, Rs2",
+        "operands": [
+          {"name": "Rd",  "type": "register", "role": "destination"},
+          {"name": "Rs1", "type": "register", "role": "minuend"},
+          {"name": "Rs2", "type": "register", "role": "subtrahend"}
+        ],
+        "semantics": "Rd ← Rs1 - Rs2",
+        "side_effects": {"writes_register": "Rd"},
+        "cycle_cost": 1,
+        "cycle_breakdown": ["Cycle 1: Read Rs1, Rs2 → ALU subtract → write Rd"]
+      },
+      "MOV": {
+        "syntax": "MOV Rd, imm",
+        "operands": [
+          {"name": "Rd",  "type": "register",  "role": "destination"},
+          {"name": "imm", "type": "immediate",  "role": "source_value"}
+        ],
+        "semantics": "Rd ← imm",
+        "side_effects": {"writes_register": "Rd"},
+        "cycle_cost": 1,
+        "cycle_breakdown": ["Cycle 1: Decode immediate → write Rd"]
+      },
+      "BEQ": {
+        "syntax": "BEQ Rs1, Rs2, label",
+        "operands": [
+          {"name": "Rs1",   "type": "register", "role": "compare_a"},
+          {"name": "Rs2",   "type": "register", "role": "compare_b"},
+          {"name": "label", "type": "label",    "role": "branch_target"}
+        ],
+        "semantics": "if Rs1 == Rs2 then PC ← labels[label] else PC ← PC + 1",
+        "side_effects": {"writes_pc": true},
+        "cycle_cost": 2,
+        "misprediction_penalty": 2,
+        "branch_predictor": "static_always_taken",
+        "cycle_breakdown": [
+          "Cycle 1: Decode + read Rs1, Rs2 + ALU compare",
+          "Cycle 2: Update PC; if not-taken, flush 2 stall cycles (misprediction penalty)"
+        ]
+      },
+      "BNE": {
+        "syntax": "BNE Rs1, Rs2, label",
+        "operands": [
+          {"name": "Rs1",   "type": "register", "role": "compare_a"},
+          {"name": "Rs2",   "type": "register", "role": "compare_b"},
+          {"name": "label", "type": "label",    "role": "branch_target"}
+        ],
+        "semantics": "if Rs1 != Rs2 then PC ← labels[label] else PC ← PC + 1",
+        "side_effects": {"writes_pc": true},
+        "cycle_cost": 2,
+        "misprediction_penalty": 2,
+        "branch_predictor": "static_always_taken",
+        "cycle_breakdown": [
+          "Cycle 1: Decode + read Rs1, Rs2 + ALU compare",
+          "Cycle 2: Update PC; if not-taken (equal), flush 2 stall cycles"
+        ]
+      },
+      "JMP": {
+        "syntax": "JMP label",
+        "operands": [
+          {"name": "label", "type": "label", "role": "jump_target"}
+        ],
+        "semantics": "PC ← labels[label]",
+        "side_effects": {"writes_pc": true},
+        "cycle_cost": 2,
+        "cycle_breakdown": [
+          "Cycle 1: Decode + resolve target address",
+          "Cycle 2: Reload PC + pipeline flush"
+        ]
+      },
+      "NOP": {
+        "syntax": "NOP",
+        "operands": [],
+        "semantics": "no operation",
+        "side_effects": {},
+        "cycle_cost": 1,
+        "cycle_breakdown": ["Cycle 1: Decode + no-op"]
+      },
+      "HALT": {
+        "syntax": "HALT",
+        "operands": [],
+        "semantics": "CPU stops execution; halted ← true",
+        "side_effects": {"sets_halted": true},
+        "cycle_cost": 1,
+        "cycle_breakdown": ["Cycle 1: Decode + set halted flag"]
+      }
+    }
+  },
+
+  "cisc": {
+    "description": "Complex Instruction Set Computer — memory-to-memory operations, variable-length micro-op sequences, rich addressing modes.",
+    "design_principles": [
+      "Instructions operate directly on memory (no load/store restriction).",
+      "Each instruction decomposes into 1–4 micro-operations (µ-ops).",
+      "Each µ-op consumes exactly one clock cycle.",
+      "Total instruction cost = 1 (fetch/decode) + N µ-ops.",
+      "Memory references use [addr] bracket syntax."
+    ],
+    "clock_period_ns": 1.5,
+    "instructions": {
+      "ADD": {
+        "syntax": "ADD [addr1], [addr2]",
+        "operands": [
+          {"name": "addr1", "type": "memory_ref", "role": "destination_and_source_a"},
+          {"name": "addr2", "type": "memory_ref", "role": "source_b"}
+        ],
+        "semantics": "MEM[addr1] ← MEM[addr1] + MEM[addr2]",
+        "side_effects": {"writes_memory": "addr1"},
+        "micro_ops": [
+          {"index": 1, "component": "MEMORY",  "action": "READ MEM[addr1]"},
+          {"index": 2, "component": "MEMORY",  "action": "READ MEM[addr2]"},
+          {"index": 3, "component": "ALU",     "action": "ADD operands"},
+          {"index": 4, "component": "MEMORY",  "action": "WRITE result → MEM[addr1]"}
+        ],
+        "total_cycles": 5,
+        "cycle_breakdown": "1 fetch/decode + 4 µ-ops"
+      },
+      "SUB": {
+        "syntax": "SUB [addr1], [addr2]",
+        "operands": [
+          {"name": "addr1", "type": "memory_ref", "role": "destination_and_minuend"},
+          {"name": "addr2", "type": "memory_ref", "role": "subtrahend"}
+        ],
+        "semantics": "MEM[addr1] ← MEM[addr1] - MEM[addr2]",
+        "side_effects": {"writes_memory": "addr1"},
+        "micro_ops": [
+          {"index": 1, "component": "MEMORY", "action": "READ MEM[addr1]"},
+          {"index": 2, "component": "MEMORY", "action": "READ MEM[addr2]"},
+          {"index": 3, "component": "ALU",    "action": "SUB operands"},
+          {"index": 4, "component": "MEMORY", "action": "WRITE result → MEM[addr1]"}
+        ],
+        "total_cycles": 5,
+        "cycle_breakdown": "1 fetch/decode + 4 µ-ops"
+      },
+      "MUL": {
+        "syntax": "MUL [addr1], [addr2]",
+        "operands": [
+          {"name": "addr1", "type": "memory_ref", "role": "destination_and_multiplicand"},
+          {"name": "addr2", "type": "memory_ref", "role": "multiplier"}
+        ],
+        "semantics": "MEM[addr1] ← MEM[addr1] * MEM[addr2]",
+        "side_effects": {"writes_memory": "addr1"},
+        "micro_ops": [
+          {"index": 1, "component": "MEMORY", "action": "READ MEM[addr1]"},
+          {"index": 2, "component": "MEMORY", "action": "READ MEM[addr2]"},
+          {"index": 3, "component": "ALU",    "action": "MUL operands"},
+          {"index": 4, "component": "MEMORY", "action": "WRITE result → MEM[addr1]"}
+        ],
+        "total_cycles": 5,
+        "cycle_breakdown": "1 fetch/decode + 4 µ-ops"
+      },
+      "MOV": {
+        "syntax": "MOV [addr], imm",
+        "operands": [
+          {"name": "addr", "type": "memory_ref", "role": "destination"},
+          {"name": "imm",  "type": "immediate",  "role": "source_value"}
+        ],
+        "semantics": "MEM[addr] ← imm",
+        "side_effects": {"writes_memory": "addr"},
+        "micro_ops": [
+          {"index": 1, "component": "CONTROL", "action": "DECODE MOV + prepare immediate"},
+          {"index": 2, "component": "MEMORY",  "action": "WRITE imm → MEM[addr]"}
+        ],
+        "total_cycles": 3,
+        "cycle_breakdown": "1 fetch/decode + 2 µ-ops"
+      },
+      "LOAD": {
+        "syntax": "LOAD Rd, [addr]",
+        "operands": [
+          {"name": "Rd",   "type": "register",   "role": "destination"},
+          {"name": "addr", "type": "memory_ref", "role": "source_address"}
+        ],
+        "semantics": "Rd ← MEM[addr]",
+        "side_effects": {"writes_register": "Rd"},
+        "micro_ops": [
+          {"index": 1, "component": "CONTROL",   "action": "DECODE LOAD"},
+          {"index": 2, "component": "MEMORY",    "action": "READ MEM[addr]"},
+          {"index": 3, "component": "REGISTERS", "action": "WRITE Rd ← value"}
+        ],
+        "total_cycles": 4,
+        "cycle_breakdown": "1 fetch/decode + 3 µ-ops"
+      },
+      "STORE": {
+        "syntax": "STORE [addr], Rs",
+        "operands": [
+          {"name": "addr", "type": "memory_ref", "role": "destination_address"},
+          {"name": "Rs",   "type": "register",   "role": "source_value"}
+        ],
+        "semantics": "MEM[addr] ← Rs",
+        "side_effects": {"writes_memory": "addr"},
+        "micro_ops": [
+          {"index": 1, "component": "CONTROL",   "action": "DECODE STORE"},
+          {"index": 2, "component": "REGISTERS", "action": "READ Rs"},
+          {"index": 3, "component": "MEMORY",    "action": "WRITE Rs → MEM[addr]"}
+        ],
+        "total_cycles": 4,
+        "cycle_breakdown": "1 fetch/decode + 3 µ-ops"
+      },
+      "INC": {
+        "syntax": "INC [addr]",
+        "operands": [
+          {"name": "addr", "type": "memory_ref", "role": "destination_and_source"}
+        ],
+        "semantics": "MEM[addr] ← MEM[addr] + 1",
+        "side_effects": {"writes_memory": "addr"},
+        "micro_ops": [
+          {"index": 1, "component": "MEMORY", "action": "READ MEM[addr]"},
+          {"index": 2, "component": "ALU",    "action": "ADD 1"},
+          {"index": 3, "component": "MEMORY", "action": "WRITE result → MEM[addr]"}
+        ],
+        "total_cycles": 4,
+        "cycle_breakdown": "1 fetch/decode + 3 µ-ops"
+      },
+      "DEC": {
+        "syntax": "DEC [addr]",
+        "operands": [
+          {"name": "addr", "type": "memory_ref", "role": "destination_and_source"}
+        ],
+        "semantics": "MEM[addr] ← MEM[addr] - 1",
+        "side_effects": {"writes_memory": "addr"},
+        "micro_ops": [
+          {"index": 1, "component": "MEMORY", "action": "READ MEM[addr]"},
+          {"index": 2, "component": "ALU",    "action": "SUB 1"},
+          {"index": 3, "component": "MEMORY", "action": "WRITE result → MEM[addr]"}
+        ],
+        "total_cycles": 4,
+        "cycle_breakdown": "1 fetch/decode + 3 µ-ops"
+      },
+      "BEQ": {
+        "syntax": "BEQ [addr1], [addr2], label",
+        "operands": [
+          {"name": "addr1", "type": "memory_ref", "role": "compare_a"},
+          {"name": "addr2", "type": "memory_ref", "role": "compare_b"},
+          {"name": "label", "type": "label",      "role": "branch_target"}
+        ],
+        "semantics": "if MEM[addr1] == MEM[addr2] then PC ← labels[label] else PC ← PC + 1",
+        "side_effects": {"writes_pc": true},
+        "micro_ops": [
+          {"index": 1, "component": "MEMORY",  "action": "READ MEM[addr1]"},
+          {"index": 2, "component": "MEMORY",  "action": "READ MEM[addr2]"},
+          {"index": 3, "component": "ALU",     "action": "COMPARE equal"},
+          {"index": 4, "component": "PC",      "action": "UPDATE PC (taken or sequential)"}
+        ],
+        "total_cycles": 5,
+        "cycle_breakdown": "1 fetch/decode + 4 µ-ops"
+      },
+      "JMP": {
+        "syntax": "JMP label",
+        "operands": [
+          {"name": "label", "type": "label", "role": "jump_target"}
+        ],
+        "semantics": "PC ← labels[label]",
+        "side_effects": {"writes_pc": true},
+        "micro_ops": [
+          {"index": 1, "component": "CONTROL", "action": "DECODE JMP + resolve target"},
+          {"index": 2, "component": "PC",      "action": "SET PC ← target"}
+        ],
+        "total_cycles": 3,
+        "cycle_breakdown": "1 fetch/decode + 2 µ-ops"
+      },
+      "NOP": {
+        "syntax": "NOP",
+        "operands": [],
+        "semantics": "no operation",
+        "side_effects": {},
+        "micro_ops": [
+          {"index": 1, "component": "CONTROL", "action": "NOP — no operation"}
+        ],
+        "total_cycles": 2,
+        "cycle_breakdown": "1 fetch/decode + 1 µ-op"
+      },
+      "HALT": {
+        "syntax": "HALT",
+        "operands": [],
+        "semantics": "CPU stops execution; halted ← true",
+        "side_effects": {"sets_halted": true},
+        "micro_ops": [
+          {"index": 1, "component": "CONTROL", "action": "HALT — CPU stopped"}
+        ],
+        "total_cycles": 2,
+        "cycle_breakdown": "1 fetch/decode + 1 µ-op"
+      }
+    }
+  },
+
+  "simulation_modes": {
+    "functional": {
+      "description": "Only final CPU state matters. Cycles are counted but pipeline internals are not modelled.",
+      "outputs": ["final_registers", "final_memory", "final_pc", "total_cycles", "instruction_count"]
+    },
+    "microarchitectural": {
+      "description": "Models internal pipeline/µ-op behaviour cycle by cycle. Exposes control signals, pipeline stages, and stall events.",
+      "outputs": ["cycle_timeline", "pipeline_stages_per_cycle", "control_signals", "stall_events", "branch_resolution"]
+    }
+  },
+
+  "equivalence_contract": {
+    "description": "A CISC program and its RISC transpilation are semantically equivalent if and only if they produce identical final CPU state.",
+    "checked_fields": ["registers", "memory", "halted"],
+    "not_checked": ["pc", "cycles"],
+    "rationale": "PC and cycle count differ by design (different ISAs). Only observable state (registers + memory) must match."
+  }
+}

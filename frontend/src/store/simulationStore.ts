@@ -16,6 +16,9 @@ interface SimState {
   learningMode: boolean;
   isPausedForQuestion: boolean;
 
+  // Input values for READ instructions
+  inputValues: number[];
+
   // Actions
   setCode: (code: string) => void;
   setPipeline: (v: boolean) => void;
@@ -28,6 +31,7 @@ interface SimState {
   setSpeed: (s: number) => void;
   setLearningMode: (v: boolean) => void;
   setIsPausedForQuestion: (v: boolean) => void;
+  setInputValues: (v: number[]) => void;
   stepForward: () => void;
   resetPlayback: () => void;
 }
@@ -51,6 +55,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   speed: 1,
   learningMode: true,
   isPausedForQuestion: false,
+  inputValues: [],
 
   setCode: (code) => set({ code }),
   setPipeline: (pipeline) => set({ pipeline }),
@@ -66,6 +71,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   setSpeed: (speed) => set({ speed }),
   setLearningMode: (learningMode) => set({ learningMode }),
   setIsPausedForQuestion: (isPausedForQuestion) => set({ isPausedForQuestion }),
+  setInputValues: (inputValues) => set({ inputValues }),
   stepForward: () => {
     const { result, activeArch, currentCycle } = get();
     if (!result) return;

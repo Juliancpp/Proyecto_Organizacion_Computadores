@@ -34,16 +34,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CYCLE_COSTS: dict[str, int] = {
-    "LOAD":  2,
-    "STORE": 2,
-    "ADD":   1,
-    "SUB":   1,
-    "MOV":   1,
-    "BEQ":   2,
-    "BNE":   2,
-    "JMP":   2,
-    "NOP":   1,
-    "HALT":  1,
+    "LOAD":      2,
+    "STORE":     2,
+    "ADD":       1,
+    "SUB":       1,
+    "MOV":       1,
+    "BEQ":       2,
+    "BNE":       2,
+    "JMP":       2,
+    "NOP":       1,
+    "HALT":      1,
+    "PRINT":     1,
+    "PRINT_MEM": 1,
+    "PRINT_STR": 1,
+    "READ":      1,
 }
 
 # Extra penalty cycles added when a branch is mispredicted
@@ -136,6 +140,14 @@ def _execute_instruction(
     elif opcode == "HALT":
         _exec_halt(state)
         return
+    elif opcode == "PRINT":
+        _exec_print(state, ops)
+    elif opcode == "PRINT_MEM":
+        _exec_print_mem(state, ops)
+    elif opcode == "PRINT_STR":
+        _exec_print_str(state, ops)
+    elif opcode == "READ":
+        _exec_read(state, ops)
     else:
         raise InvalidInstructionError(f"Unknown RISC opcode '{opcode}'", instr.line_number)
 
@@ -527,4 +539,71 @@ def _exec_halt(state: CPUState) -> None:
         meta={"halted": True},
     ))
     state.halted = True
+    state.end_cycle()
+
+
+# ---------------------------------------------------------------------------
+# PRINT Rx  →  1 cycle
+# ---------------------------------------------------------------------------
+
+def _exec_print(state: CPUState, ops: list[Any]) -> None:
+    rd = ops[0]
+    value = state.read_register(rd)
+    state.new_cycle()
+    state.add_event(Event(
+        Component.CONTROL, f"PRINT R{rd} = {value}",
+        inputs=[f"R{rd}"], output=str(value),
+        meta={"output": True, "output_type": "register"},
+    ))
+    state.emit_output("register", str(value), label=f"R{rd}")
+    state.end_cycle()
+
+
+# ---------------------------------------------------------------------------
+# PRINT_MEM addr  →  1 cycle
+# ---------------------------------------------------------------------------
+
+def _exec_print_mem(state: CPUState, ops: list[Any]) -> None:
+    addr = ops[0]
+    value = state.read_memory(addr)
+    state.new_cycle()
+    state.add_event(Event(
+        Component.MEMORY, f"PRINT_MEM [{addr}] = {value}",
+        inputs=[addr], output=str(value),
+        meta={"output": True, "output_type": "memory", "address": addr},
+    ))
+    state.emit_output("memory", str(value), label=f"MEM[{addr}]")
+    state.end_cycle()
+
+
+# ---------------------------------------------------------------------------
+# PRINT_STR "text"  →  1 cycle
+# ---------------------------------------------------------------------------
+
+def _exec_print_str(state: CPUState, ops: list[Any]) -> None:
+    text = ops[0]
+    state.new_cycle()
+    state.add_event(Event(
+        Component.CONTROL, f'PRINT_STR "{text}"',
+        inputs=[], output=text,
+        meta={"output": True, "output_type": "string"},
+    ))
+    state.emit_output("string", text)
+    state.end_cycle()
+
+
+# ---------------------------------------------------------------------------
+# READ Rx  →  1 cycle
+# ---------------------------------------------------------------------------
+
+def _exec_read(state: CPUState, ops: list[Any]) -> None:
+    rd = ops[0]
+    value = state.consume_input()
+    state.new_cycle()
+    state.add_event(Event(
+        Component.REGISTERS, f"READ input → R{rd} = {value}",
+        inputs=["stdin"], output=value,
+        meta={"input": True, "register": f"R{rd}"},
+    ))
+    state.write_register(rd, value)
     state.end_cycle()

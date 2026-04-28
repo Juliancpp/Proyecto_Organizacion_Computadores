@@ -251,6 +251,40 @@ def _parse_risc_instruction(
     elif opcode == "NOP":
         operands = []
 
+    elif opcode == "PRINT":
+        # PRINT Rx  — print register value
+        if len(operands_raw) != 1:
+            raise InvalidInstructionError(f"PRINT expects 1 operand, got {len(operands_raw)}", line_num)
+        rd = _parse_register(operands_raw[0])
+        if rd is None:
+            raise InvalidInstructionError(f"Invalid register '{operands_raw[0]}'", line_num)
+        operands = [rd]
+
+    elif opcode == "PRINT_MEM":
+        # PRINT_MEM addr  — print memory value
+        if len(operands_raw) != 1:
+            raise InvalidInstructionError(f"PRINT_MEM expects 1 operand, got {len(operands_raw)}", line_num)
+        addr = _parse_immediate(operands_raw[0])
+        if addr is None:
+            raise InvalidInstructionError(f"Invalid address '{operands_raw[0]}'", line_num)
+        operands = [addr]
+
+    elif opcode == "PRINT_STR":
+        # PRINT_STR "text"  — print literal string
+        # Reconstruct the string from remaining tokens (may contain spaces)
+        raw_str = raw_line.split(None, 1)[1] if " " in raw_line else ""
+        raw_str = raw_str.strip().strip('"').strip("'")
+        operands = [raw_str]
+
+    elif opcode == "READ":
+        # READ Rx  — read integer input into register
+        if len(operands_raw) != 1:
+            raise InvalidInstructionError(f"READ expects 1 operand, got {len(operands_raw)}", line_num)
+        rd = _parse_register(operands_raw[0])
+        if rd is None:
+            raise InvalidInstructionError(f"Invalid register '{operands_raw[0]}'", line_num)
+        operands = [rd]
+
     else:
         raise InvalidInstructionError(f"Unknown RISC instruction '{opcode}'", line_num)
 
@@ -387,11 +421,11 @@ def _parse_cisc_line(raw_line: str, line_num: int) -> Instruction:
             raise InvalidInstructionError(f"Invalid memory ref '{operands_raw[0]}'", line_num)
         operands = [addr]
 
-    elif opcode == "BEQ":
-        # BEQ [addr1], [addr2], label
+    elif opcode in ("BEQ", "BNE"):
+        # BEQ/BNE [addr1], [addr2], label
         if len(operands_raw) != 3:
             raise InvalidInstructionError(
-                f"BEQ expects 3 operands, got {len(operands_raw)}", line_num
+                f"{opcode} expects 3 operands, got {len(operands_raw)}", line_num
             )
         addr1 = _parse_memory_ref(operands_raw[0])
         addr2 = _parse_memory_ref(operands_raw[1])
@@ -415,6 +449,42 @@ def _parse_cisc_line(raw_line: str, line_num: int) -> Instruction:
 
     elif opcode == "NOP":
         operands = []
+
+    elif opcode == "PRINT":
+        # PRINT Rx  — print register value
+        if len(operands_raw) != 1:
+            raise InvalidInstructionError(f"PRINT expects 1 operand, got {len(operands_raw)}", line_num)
+        rd = _parse_register(operands_raw[0])
+        if rd is None:
+            raise InvalidInstructionError(f"Invalid register '{operands_raw[0]}'", line_num)
+        operands = [rd]
+
+    elif opcode == "PRINT_MEM":
+        # PRINT_MEM [addr]  — print memory value
+        if len(operands_raw) != 1:
+            raise InvalidInstructionError(f"PRINT_MEM expects 1 operand, got {len(operands_raw)}", line_num)
+        addr = _parse_memory_ref(operands_raw[0])
+        if addr is None:
+            # Also accept bare integer address
+            addr = _parse_immediate(operands_raw[0])
+        if addr is None:
+            raise InvalidInstructionError(f"Invalid memory ref '{operands_raw[0]}'", line_num)
+        operands = [addr]
+
+    elif opcode == "PRINT_STR":
+        # PRINT_STR "text"
+        raw_str = raw_line.split(None, 1)[1] if " " in raw_line else ""
+        raw_str = raw_str.strip().strip('"').strip("'")
+        operands = [raw_str]
+
+    elif opcode == "READ":
+        # READ Rx  — read integer input into register
+        if len(operands_raw) != 1:
+            raise InvalidInstructionError(f"READ expects 1 operand, got {len(operands_raw)}", line_num)
+        rd = _parse_register(operands_raw[0])
+        if rd is None:
+            raise InvalidInstructionError(f"Invalid register '{operands_raw[0]}'", line_num)
+        operands = [rd]
 
     else:
         raise InvalidInstructionError(f"Unknown CISC instruction '{opcode}'", line_num)
