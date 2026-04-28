@@ -63,11 +63,37 @@ export interface Comparison {
   analysis: string;
 }
 
+export interface X86Result {
+  timeline: TimelineCycle[];
+  final_state: {
+    pc: number;
+    registers: Record<string, number>;
+    flags: Record<string, boolean>;
+    halted: boolean;
+    cycles: number;
+    output_log?: OutputEntry[];
+  };
+  parsed_instructions?: {
+    instructions: any[];
+    labels?: Record<string, number>;
+    data_symbols?: Record<string, any>;
+    constants?: Record<string, number>;
+  };
+  arrays: Record<string, number[]>;
+  constants: Record<string, number>;
+  cycles: number;
+  output_log: OutputEntry[];
+}
+
 export interface SimulationResponse {
   risc?: ArchResult;
   cisc?: ArchResult;
   comparison?: Comparison;
-  errors?: Partial<Record<"risc" | "cisc", string>>;
+  x86?: X86Result;
+  errors?: Partial<Record<"risc" | "cisc" | "x86", string>>;
+  error?: boolean;
+  message?: string;
+  details?: Record<string, string>;
 }
 
 export interface SimulationRequest {
@@ -75,7 +101,8 @@ export interface SimulationRequest {
   step: boolean;
   pipeline: boolean;
   transpile?: boolean;
-  risc_tcycle: number;
-  cisc_tcycle: number;
+  architecture?: "risc" | "cisc" | "x86" | "auto";
+  risc_tcycle?: number;
+  cisc_tcycle?: number;
   input_values?: number[];
 }

@@ -8,8 +8,11 @@ interface SimState {
   loading: boolean;
   error: string | null;
 
+  // Architecture selection
+  selectedArchitecture: "auto" | "risc" | "cisc" | "x86";
+
   // Playback
-  activeArch: "risc" | "cisc";
+  activeArch: "risc" | "cisc" | "x86";
   currentCycle: number;
   playing: boolean;
   speed: number; // 1, 2, 4, 8
@@ -22,10 +25,11 @@ interface SimState {
   // Actions
   setCode: (code: string) => void;
   setPipeline: (v: boolean) => void;
+  setSelectedArchitecture: (a: "auto" | "risc" | "cisc" | "x86") => void;
   setResult: (r: SimulationResponse | null) => void;
   setLoading: (v: boolean) => void;
   setError: (e: string | null) => void;
-  setActiveArch: (a: "risc" | "cisc") => void;
+  setActiveArch: (a: "risc" | "cisc" | "x86") => void;
   setCurrentCycle: (c: number) => void;
   setPlaying: (v: boolean) => void;
   setSpeed: (s: number) => void;
@@ -49,6 +53,7 @@ export const useSimStore = create<SimState>((set, get) => ({
   result: null,
   loading: false,
   error: null,
+  selectedArchitecture: "auto",
   activeArch: "risc",
   currentCycle: 0,
   playing: false,
@@ -59,8 +64,17 @@ export const useSimStore = create<SimState>((set, get) => ({
 
   setCode: (code) => set({ code }),
   setPipeline: (pipeline) => set({ pipeline }),
+  setSelectedArchitecture: (selectedArchitecture) => set({ selectedArchitecture }),
   setResult: (result) => {
-    const availableArch = result?.risc ? "risc" : result?.cisc ? "cisc" : "risc";
+    // Determine available architecture for playback
+    let availableArch: "risc" | "cisc" | "x86" = "risc";
+    if (result?.x86) {
+      availableArch = "x86";
+    } else if (result?.risc) {
+      availableArch = "risc";
+    } else if (result?.cisc) {
+      availableArch = "cisc";
+    }
     set({ result, activeArch: availableArch, currentCycle: 0, playing: false });
   },
   setLoading: (loading) => set({ loading }),

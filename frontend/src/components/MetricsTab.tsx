@@ -29,7 +29,9 @@ export function MetricsTab() {
 
   const risc = result.risc;
   const cisc = result.cisc;
-  if (!risc && !cisc) {
+  const x86 = result.x86;
+
+  if (!risc && !cisc && !x86) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm font-mono">
         No architecture result available
@@ -157,6 +159,15 @@ export function MetricsTab() {
         <MemoryTable label="RISC" memory={riscFinalState.memory} missing={!risc} />
         <MemoryTable label="CISC" memory={ciscFinalState.memory} missing={!cisc} />
       </div>
+
+      {/* x86-64 Section */}
+      {x86 && (
+        <>
+          <div className="border-t border-border my-4" />
+          <div className="text-xs font-mono font-bold uppercase tracking-wider text-neon-green mb-2">x86-64</div>
+          <X86Section x86={x86} />
+        </>
+      )}
     </div>
   );
 }
@@ -255,6 +266,84 @@ function MemoryTable({ label, memory, missing }: { label: string; memory: Record
             ))}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+function X86Section({ x86 }: { x86: Record<string, any> }) {
+  const finalState = x86.final_state || {};
+  const registers = finalState.registers || {};
+  const flags = finalState.flags || {};
+  const arrays = x86.arrays || {};
+  const timeline = x86.timeline || [];
+
+  return (
+    <div className="space-y-3">
+      {/* Cycles and Status */}
+      <div className="grid grid-cols-4 gap-3">
+        <MiniCard label="Cycles" value={x86.cycles || 0} />
+        <MiniCard label="Instructions" value={x86.parsed_instructions?.instructions?.length || 0} />
+        <MiniCard label="Halted" value={finalState.halted ? "YES" : "NO"} />
+        <MiniCard label="Timeline" value={`${timeline.length} entries`} />
+      </div>
+
+      {/* Arrays */}
+      {Object.entries(arrays).length > 0 && (
+        <div className="bg-card border border-border rounded-lg p-3">
+          <div className="text-[10px] font-mono text-muted-foreground uppercase mb-2">Data Arrays</div>
+          {Object.entries(arrays).map(([name, values]: [string, any]) => (
+            <div key={name} className="mb-2">
+              <div className="text-xs font-mono text-neon-cyan">{name}:</div>
+              <div className="text-xs font-mono text-foreground">[{Array.isArray(values) ? values.join(", ") : String(values)}]</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* x86 Registers */}
+      <div className="bg-card border border-border rounded-lg p-3">
+        <div className="text-[10px] font-mono text-muted-foreground uppercase mb-2">x86-64 Registers</div>
+        <div className="grid grid-cols-4 gap-2 text-xs font-mono">
+          {Object.entries(registers).map(([reg, val]) => (
+            <div key={reg} className="bg-secondary/50 rounded p-1">
+              <span className="text-neon-cyan">{reg}</span>: <span className="text-foreground">{val as number}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Flags */}
+      <div className="bg-card border border-border rounded-lg p-3">
+        <div className="text-[10px] font-mono text-muted-foreground uppercase mb-2">Flags</div>
+        <div className="flex gap-3 text-xs font-mono">
+          {Object.entries(flags).map(([flag, val]) => (
+            <span key={flag} className={val ? "text-green-400" : "text-red-400"}>
+              {flag}: {val ? "1" : "0"}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Timeline Preview */}
+      {timeline.length > 0 && (
+        <div className="bg-card border border-border rounded-lg p-3">
+          <div className="text-[10px] font-mono text-muted-foreground uppercase mb-2">
+            Timeline (first 5 cycles)
+          </div>
+          <div className="space-y-1 max-h-40 overflow-auto">
+            {timeline.slice(0, 5).map((cycle: any, i: number) => (
+              <div key={i} className="text-xs font-mono bg-secondary/30 rounded p-1">
+                <span className="text-neon-amber">C{cycle.cycle}</span>
+                <span className="text-muted-foreground ml-2">PC:{cycle.pc}</span>
+                <span className="text-foreground ml-2">{cycle.events?.length || 0} events</span>
+              </div>
+            ))}
+            {timeline.length > 5 && (
+              <div className="text-xs text-muted-foreground text-center">... {timeline.length - 5} more cycles</div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

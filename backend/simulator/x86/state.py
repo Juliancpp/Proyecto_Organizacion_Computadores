@@ -243,10 +243,12 @@ class X86State:
     # Cycle management (delegates to core_state)
     # ------------------------------------------------------------------
 
-    def new_cycle(self) -> int:
-        """Begin a new clock cycle."""
+    def new_cycle(self, current_instruction: str = "") -> int:
+        """Begin a new clock cycle. Sync PC and instruction to core_state."""
         self.cycles += 1
         self.core_state.cycles = self.cycles
+        self.core_state.pc = self.pc  # SYNC PC!
+        self.core_state.current_instruction = current_instruction
         return self.core_state.new_cycle()
 
     def add_event(self, event: Event) -> None:

@@ -42,27 +42,41 @@ class SimulateView(APIView):
     """
     POST /api/simulate/
 
-    Accepts assembly code and runs it through both RISC and CISC engines,
-    returning cycle-by-cycle timelines and performance metrics.
+    Accepts assembly code and runs it through the specified architecture engine(s).
 
-    Supports two modes:
-    - Unified:  ``{"code": "..."}`` — same code to both engines.
-    - Split:    ``{"risc_code": "...", "cisc_code": "..."}`` — architecture-
-                specific code.
+    Supports multiple modes:
+    - Unified:  ``{"code": "..."}`` — same code to both RISC and CISC engines.
+    - Split:    ``{"risc_code": "...", "cisc_code": "..."}`` — architecture-specific code.
+    - Targeted: ``{"code": "...", "architecture": "x86"}`` — run only specified architecture.
+
+    The ``architecture`` field controls which engine(s) run:
+    - "auto" (default): Auto-detect from code syntax; runs all matching engines.
+    - "risc": Run only RISC simulation.
+    - "cisc": Run only CISC simulation.
+    - "x86": Run only x86-64 simulation.
     """
 
     def post(self, request: Request) -> Response:
+        # Debug logging
+        logger.debug("Incoming request data: %s", request.data)
+
         serializer = SimulationRequestSerializer(data=request.data)
         if not serializer.is_valid():
+            logger.warning("Validation error: %s", serializer.errors)
             return Response(
-                {"error": "Invalid request", "details": serializer.errors},
+                {
+                    "error": True,
+                    "message": "Invalid request format",
+                    "details": serializer.errors,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         data = serializer.validated_data
         unified_code = data.get("code", "").strip()
-        risc_code = data.get("risc_code", "").strip() or unified_code
-        cisc_code = data.get("cisc_code", "").strip() or unified_code
+        risc_code = data.get("risc_code", "").strip()
+        cisc_code = data.get("cisc_code", "").strip()
+        architecture = data.get("architecture", "auto")
         transpile = data.get("transpile", False)
         step_mode = data["step"]
         use_pipeline = data["pipeline"]
@@ -71,68 +85,112 @@ class SimulateView(APIView):
         simulation_mode = data.get("simulation_mode", "microarchitectural")
         input_values = data.get("input_values", [])
 
+        logger.info(
+            "Simulation request: architecture=%s, transpile=%s, code_length=%d",
+            architecture, transpile, len(unified_code),
+        )
+
+        # If architecture is explicitly set, handle accordingly
+        is_x86 = is_x86_syntax(unified_code) if unified_code else False
+
+        # Skip transpile if x86 code detected (transpile is for common dialect only)
+        if transpile and is_x86:
+            logger.info("X86 syntax detected, disabling transpile")
+            transpile = False
+
         if transpile:
             if not unified_code:
                 return Response(
-                    {"error": "Invalid request", "details": {"code": ["This field is required when transpile=true."]}},
+                    {
+                        "error": True,
+                        "message": "Code field is required when transpile=true",
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             try:
                 risc_code, cisc_code = transpile_common_to_risc_cisc(unified_code)
+                logger.info("Transpilation successful: RISC=%d chars, CISC=%d chars", len(risc_code), len(cisc_code))
             except SimulatorError as exc:
+                logger.error("Transpilation failed: %s", exc)
                 return Response(
-                    {"error": "Transpilation failed", "details": str(exc)},
-                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    {
+                        "error": True,
+                        "message": f"Transpilation failed: {exc}",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
         response_data: dict = {}
         errors: dict = {}
+        any_success = False
+
+        # Determine which architectures to run based on 'architecture' field
+        run_risc = architecture in ("auto", "risc") and (risc_code or unified_code)
+        run_cisc = architecture in ("auto", "cisc") and (cisc_code or unified_code)
+        run_x86 = architecture in ("auto", "x86") and unified_code
 
         # ------ RISC simulation ------
-        if risc_code:
+        if run_risc:
+            code_to_run = risc_code or unified_code
             try:
-                risc_result = self._run_risc(risc_code, step_mode, use_pipeline, risc_tcycle, simulation_mode, input_values)
+                risc_result = self._run_risc(code_to_run, step_mode, use_pipeline, risc_tcycle, simulation_mode, input_values)
                 response_data["risc"] = risc_result
-            except SimulatorError as exc:
-                errors["risc"] = str(exc)
-                logger.warning("RISC simulation error: %s", exc)
+                any_success = True
+                logger.info("RISC simulation successful")
+            except Exception as exc:
+                error_msg = str(exc)
+                errors["risc"] = error_msg
+                logger.warning("RISC simulation error: %s", error_msg)
 
         # ------ CISC simulation ------
-        if cisc_code:
+        if run_cisc:
+            code_to_run = cisc_code or unified_code
             try:
-                cisc_result = self._run_cisc(cisc_code, step_mode, use_pipeline, cisc_tcycle, simulation_mode, input_values)
+                cisc_result = self._run_cisc(code_to_run, step_mode, use_pipeline, cisc_tcycle, simulation_mode, input_values)
                 response_data["cisc"] = cisc_result
-            except SimulatorError as exc:
-                errors["cisc"] = str(exc)
-                logger.warning("CISC simulation error: %s", exc)
+                any_success = True
+                logger.info("CISC simulation successful")
+            except Exception as exc:
+                error_msg = str(exc)
+                errors["cisc"] = error_msg
+                logger.warning("CISC simulation error: %s", error_msg)
 
-        # ------ Comparison (only if both succeeded) ------
+        # ------ Comparison (only if both RISC and CISC succeeded) ------
         if "risc" in response_data and "cisc" in response_data:
             risc_m = response_data["risc"]["metrics"]
             cisc_m = response_data["cisc"]["metrics"]
             comparison = self._build_comparison(risc_m, cisc_m)
             response_data["comparison"] = comparison
 
+        # ------ x86-64 simulation ------
+        if run_x86:
+            try:
+                x86_result = self._run_x86(unified_code)
+                response_data["x86"] = x86_result
+                any_success = True
+                logger.info("x86-64 simulation successful")
+            except Exception as exc:
+                error_msg = str(exc)
+                errors["x86"] = error_msg
+                logger.warning("x86-64 simulation error: %s", error_msg)
+
         if errors:
             response_data["errors"] = errors
 
-        # ------ x86-64 auto-detection ------
-        source_for_x86 = unified_code or risc_code or cisc_code
-        if source_for_x86 and is_x86_syntax(source_for_x86):
-            try:
-                x86_result = self._run_x86(source_for_x86)
-                response_data["x86"] = x86_result
-            except SimulatorError as exc:
-                errors["x86"] = str(exc)
-                logger.warning("x86-64 simulation error: %s", exc)
+        # Return success if any simulation succeeded
+        if any_success:
+            return Response(response_data, status=status.HTTP_200_OK)
 
-        if not response_data or (errors and "risc" not in response_data and "cisc" not in response_data and "x86" not in response_data):
-            return Response(
-                {"error": "All simulations failed", "details": errors},
-                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            )
-
-        return Response(response_data, status=status.HTTP_200_OK)
+        # All simulations failed - return 400 with detailed errors
+        logger.error("All simulations failed: %s", errors)
+        return Response(
+            {
+                "error": True,
+                "message": "All simulations failed",
+                "details": errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -346,10 +404,17 @@ class SimulateX86View(APIView):
     """
 
     def post(self, request: Request) -> Response:
+        logger.debug("Incoming x86 request: %s", request.data)
+
         serializer = SingleArchRequestSerializer(data=request.data)
         if not serializer.is_valid():
+            logger.warning("Validation error: %s", serializer.errors)
             return Response(
-                {"error": "Invalid request", "details": serializer.errors},
+                {
+                    "error": True,
+                    "message": "Invalid request format",
+                    "details": serializer.errors,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -357,7 +422,9 @@ class SimulateX86View(APIView):
         code = data["code"]
 
         try:
+            logger.info("Parsing x86 code (%d chars)", len(code))
             parsed = parse_x86(code)
+            logger.info("Executing x86: %d instructions", len(parsed.instructions))
             state = execute_x86(parsed)
 
             # Read arrays from data symbols for output
@@ -367,6 +434,8 @@ class SimulateX86View(APIView):
                     arrays[name] = read_array_from_memory(state, sym)
 
             timeline = [s.to_dict() for s in state.core_state.timeline]
+
+            logger.info("x86 simulation complete: %d cycles, halted=%s", state.cycles, state.halted)
 
             return Response({
                 "timeline": timeline,
@@ -378,5 +447,12 @@ class SimulateX86View(APIView):
                 "output_log": state.output_log,
             })
 
-        except SimulatorError as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        except Exception as exc:
+            logger.error("x86 simulation failed: %s", exc)
+            return Response(
+                {
+                    "error": True,
+                    "message": str(exc),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )

@@ -15,7 +15,7 @@ const ALL_COMPONENTS: ComponentName[] = ["CONTROL", "PC", "REGISTERS", "ALU", "B
 
 export function EventsTab() {
   const { result, currentCycle, activeArch } = useSimStore();
-  const [archFilter, setArchFilter] = useState<"both" | "risc" | "cisc">("both");
+  const [archFilter, setArchFilter] = useState<"all" | "risc" | "cisc" | "x86">("all");
   const [componentFilter, setComponentFilter] = useState<Set<ComponentName>>(new Set(ALL_COMPONENTS));
 
   const toggleComponent = (c: ComponentName) => {
@@ -28,10 +28,11 @@ export function EventsTab() {
     if (!result) return [];
     const out: { cycle: number; arch: string; component: ComponentName; action: string; inputs: string; output: string }[] = [];
 
-    const addArch = (archName: string, timeline: typeof result.risc.timeline | undefined) => {
+    const addArch = (archName: string, timeline: any[] | undefined) => {
       if (!timeline) return;
       timeline.forEach((tc) => {
-        tc.events.forEach((ev) => {
+        const events = tc.events || [];
+        events.forEach((ev: any) => {
           if (!componentFilter.has(ev.component)) return;
           out.push({
             cycle: tc.cycle,
@@ -45,8 +46,9 @@ export function EventsTab() {
       });
     };
 
-    if (archFilter === "both" || archFilter === "risc") addArch("RISC", result.risc?.timeline);
-    if (archFilter === "both" || archFilter === "cisc") addArch("CISC", result.cisc?.timeline);
+    if (archFilter === "all" || archFilter === "risc") addArch("RISC", result.risc?.timeline);
+    if (archFilter === "all" || archFilter === "cisc") addArch("CISC", result.cisc?.timeline);
+    if (archFilter === "all" || archFilter === "x86") addArch("X86", result.x86?.timeline);
 
     return out.sort((a, b) => a.cycle - b.cycle);
   }, [result, archFilter, componentFilter]);
@@ -67,7 +69,7 @@ export function EventsTab() {
       {/* Filters */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card flex-wrap">
         <span className="text-[10px] font-mono text-muted-foreground">Arch:</span>
-        {(["both", "risc", "cisc"] as const).map((a) => (
+        {(["all", "risc", "cisc", "x86"] as const).map((a) => (
           <button key={a} onClick={() => setArchFilter(a)}
             className={`px-1.5 py-0.5 text-[10px] font-mono rounded uppercase ${
               archFilter === a ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
@@ -110,7 +112,11 @@ export function EventsTab() {
                 }`}>
                 <td className="px-3 py-1 text-muted-foreground">{row.cycle}</td>
                 <td className="px-2 py-1">
-                  <span className={row.arch === "RISC" ? "text-neon-cyan" : "text-neon-violet"}>
+                  <span className={
+                    row.arch === "RISC" ? "text-neon-cyan" :
+                    row.arch === "CISC" ? "text-neon-violet" :
+                    "text-neon-green"
+                  }>
                     {row.arch}
                   </span>
                 </td>

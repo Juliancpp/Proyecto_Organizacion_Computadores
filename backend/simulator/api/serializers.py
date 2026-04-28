@@ -18,7 +18,7 @@ class SimulationRequestSerializer(serializers.Serializer):
     """
     POST /api/simulate/
 
-    Supports two usage modes:
+    Supports multiple usage modes:
 
     1. **Unified mode** — provide ``code`` and both engines receive the
        same source.  Parsing errors on one side are reported but don't
@@ -27,6 +27,9 @@ class SimulationRequestSerializer(serializers.Serializer):
     2. **Split mode** — provide ``risc_code`` and/or ``cisc_code``
        separately so each architecture gets idiomatic assembly.
 
+    3. **Architecture mode** — provide ``code`` and ``architecture``
+       to run only that specific architecture (risc|cisc|x86).
+
     At least one of ``code``, ``risc_code``, or ``cisc_code`` must be
     provided.
     """
@@ -34,7 +37,7 @@ class SimulationRequestSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
         default="",
-        help_text="Assembly code to send to BOTH engines (unified mode).",
+        help_text="Assembly code to send to specified engine(s).",
     )
     risc_code = serializers.CharField(
         required=False,
@@ -47,6 +50,12 @@ class SimulationRequestSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
         help_text="CISC-specific assembly code.",
+    )
+    architecture = serializers.ChoiceField(
+        choices=["risc", "cisc", "x86", "auto"],
+        required=False,
+        default="auto",
+        help_text="Target architecture. 'auto' detects from code syntax.",
     )
     step = serializers.BooleanField(
         required=False,
@@ -91,6 +100,12 @@ class SimulationRequestSerializer(serializers.Serializer):
         default=list,
         help_text="Integer values to supply to READ instructions in order.",
     )
+
+    def validate_code(self, value):
+        """Accept any string as code - parsing happens later."""
+        if value is None:
+            return ""
+        return str(value)
 
     def validate(self, attrs):
         code = attrs.get("code", "").strip()

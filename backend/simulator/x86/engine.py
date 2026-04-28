@@ -117,8 +117,8 @@ def _execute_instruction(
     opcode = instr.opcode
     ops = instr.operands
 
-    # Record cycle
-    state.new_cycle()
+    # Record cycle with current instruction
+    state.new_cycle(instr.raw)
 
     try:
         if opcode == "mov":
