@@ -87,6 +87,22 @@
         "cycle_cost": 1,
         "cycle_breakdown": ["Cycle 1: Read Rs1, Rs2 → ALU subtract → write Rd"]
       },
+      "MUL": {
+        "syntax": "MUL Rd, Rs1, Rs2",
+        "operands": [
+          {"name": "Rd",  "type": "register", "role": "destination"},
+          {"name": "Rs1", "type": "register", "role": "multiplicand"},
+          {"name": "Rs2", "type": "register", "role": "multiplier"}
+        ],
+        "semantics": "Rd ← Rs1 * Rs2",
+        "side_effects": {"writes_register": "Rd"},
+        "cycle_cost": 3,
+        "cycle_breakdown": [
+          "Cycle 1: Read Rs1, Rs2",
+          "Cycle 2: ALU multiply (multi-cycle)",
+          "Cycle 3: Write result to Rd"
+        ]
+      },
       "MOV": {
         "syntax": "MOV Rd, imm",
         "operands": [

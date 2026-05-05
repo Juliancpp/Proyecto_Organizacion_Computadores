@@ -386,6 +386,29 @@ def _transpile_instruction(
             label_counter,
         )
 
+    if opcode == "MUL":
+        # MUL Rd, Rs1, Rs2  →  Rd = Rs1 * Rs2
+        # RISC: native MUL instruction (3 cycles).
+        # CISC: emulated via mem-to-mem MUL — we must copy Rs1's value to Rd's
+        # memory slot first (because CISC MUL [a], [b] does MEM[a] *= MEM[b]).
+        if len(ops) != 3:
+            raise InvalidInstructionError("MUL expects 3 operands", line_num)
+        rd = _reg_index(ops[0], line_num)
+        rs1 = _reg_index(ops[1], line_num)
+        rs2 = _reg_index(ops[2], line_num)
+        cisc_seq = [
+            f"LOAD R{scratch0}, [{raddr(rs1)}]",   # scratch0 = Rs1
+            f"LOAD R{scratch1}, [{raddr(rs2)}]",   # scratch1 = Rs2
+            f"STORE [{raddr(rd)}], R{scratch0}",   # MEM[rd]  = Rs1
+            f"STORE [{tmp1_addr}], R{scratch1}",   # MEM[tmp1] = Rs2
+            f"MUL [{raddr(rd)}], [{tmp1_addr}]",   # MEM[rd] *= Rs2  →  Rs1 * Rs2
+        ]
+        return (
+            [f"MUL R{rd}, R{rs1}, R{rs2}"],
+            cisc_seq,
+            label_counter,
+        )
+
     if opcode == "BEQ":
         if len(ops) != 3:
             raise InvalidInstructionError("BEQ expects 3 operands", line_num)
@@ -430,3 +453,234 @@ def _transpile_instruction(
         return ([opcode], [opcode], label_counter)
 
     raise ParseError(f"Unsupported common opcode '{opcode}'", line_num)
+
+
+# ===========================================================================
+# CISC → RISC transpiler
+# ===========================================================================
+#
+# Converts a CISC-style program (memory-destination operations, memory-to-
+# memory arithmetic, INC/DEC on memory, etc.) into semantically equivalent
+# RISC code using scratch registers.
+#
+# Used when the user writes pure CISC code but wants both engines to run
+# for comparison.
+#
+# CISC                          →  RISC equivalent
+# ─────────────────────────────────────────────────────────────────────────
+# MOV [addr], imm               →  MOV Rs, imm ; STORE Rs, addr
+# LOAD Rd, [addr]               →  LOAD Rd, addr
+# STORE [addr], Rs              →  STORE Rs, addr
+# ADD [a], [b]                  →  LOAD Ra, a ; LOAD Rb, b ; ADD Ra, Ra, Rb ; STORE Ra, a
+# SUB [a], [b]                  →  LOAD Ra, a ; LOAD Rb, b ; SUB Ra, Ra, Rb ; STORE Ra, a
+# MUL [a], [b]                  →  LOAD Ra, a ; LOAD Rb, b ; MUL Ra, Ra, Rb ; STORE Ra, a
+# INC [addr]                    →  LOAD Ra, addr ; MOV Rb, 1 ; ADD Ra, Ra, Rb ; STORE Ra, addr
+# DEC [addr]                    →  LOAD Ra, addr ; MOV Rb, 1 ; SUB Ra, Ra, Rb ; STORE Ra, addr
+# BEQ [a], [b], L               →  LOAD Ra, a ; LOAD Rb, b ; BEQ Ra, Rb, L
+# BNE [a], [b], L               →  LOAD Ra, a ; LOAD Rb, b ; BNE Ra, Rb, L
+# JMP / HALT / NOP              →  unchanged
+
+# CISC memory reference: [addr]
+_CISC_MEM_RE = re.compile(r"^\[(\d+)\]$")
+# CISC-style register token: either bare 0-7 or R0-R7
+_CISC_REG_RE = re.compile(r"^R?([0-7])$", re.IGNORECASE)
+
+
+def transpile_cisc_to_risc(source: str) -> str:
+    """
+    Transpile a CISC-style assembly program into equivalent RISC code.
+
+    Uses 2 scratch registers (the lowest-numbered registers not used by any
+    LOAD/STORE operand in the user's code). Raises ParseError if scratch
+    registers cannot be safely allocated.
+    """
+    lines = source.strip().splitlines()
+    clean_lines: list[tuple[int, str]] = []
+    for idx, raw in enumerate(lines):
+        line = raw.split(";")[0].strip()
+        if not line:
+            continue
+        clean_lines.append((idx + 1, line))
+
+    # Count how often each register is used across the program.
+    # In CISC code, registers are ephemeral (every use follows a fresh LOAD),
+    # so scratch corruption is generally safe — but picking the LEAST-used
+    # registers minimizes the risk if registers happen to be live across
+    # multi-instruction sequences.
+    register_usage: dict[int, int] = {i: 0 for i in _ALL_REGISTERS}
+    for line_num, line in clean_lines:
+        _, instr = _extract_label(line)
+        if not instr:
+            continue
+        tokens = [t.strip().rstrip(",") for t in re.split(r"[,\s]+", instr) if t.strip()]
+        if not tokens:
+            continue
+        opcode = tokens[0].upper()
+        if opcode == "LOAD" and len(tokens) >= 2:
+            m = _CISC_REG_RE.match(tokens[1])
+            if m:
+                register_usage[int(m.group(1))] += 1
+        elif opcode == "STORE" and len(tokens) >= 3:
+            m = _CISC_REG_RE.match(tokens[2])
+            if m:
+                register_usage[int(m.group(1))] += 1
+
+    # Prefer unused registers; fall back to least-used ones.
+    ranked = sorted(_ALL_REGISTERS, key=lambda r: (register_usage[r], r))
+    sa, sb = ranked[0], ranked[1]
+
+    risc_lines: list[str] = []
+
+    for line_num, line in clean_lines:
+        label, instruction_part = _extract_label(line)
+        if label:
+            risc_lines.append(f"{label}:")
+        if not instruction_part:
+            continue
+
+        tokens = [t.strip().rstrip(",") for t in re.split(r"[,\s]+", instruction_part) if t.strip()]
+        if not tokens:
+            continue
+        opcode = tokens[0].upper()
+        ops = tokens[1:]
+
+        risc_lines.extend(_cisc_op_to_risc(opcode, ops, line_num, sa, sb))
+
+    return "\n".join(risc_lines).strip()
+
+
+def _cisc_op_to_risc(
+    opcode: str,
+    ops: list[str],
+    line_num: int,
+    sa: int,
+    sb: int,
+) -> list[str]:
+    """Convert a single CISC instruction into a list of equivalent RISC lines."""
+
+    def mem(tok: str) -> int:
+        """Parse a [addr] memory reference and return the address."""
+        m = _CISC_MEM_RE.match(tok)
+        if not m:
+            raise InvalidInstructionError(f"Expected memory ref [addr], got '{tok}'", line_num)
+        return int(m.group(1))
+
+    def reg(tok: str) -> int:
+        """Parse a register token (bare digit or R-prefixed)."""
+        m = _CISC_REG_RE.match(tok)
+        if not m:
+            raise InvalidInstructionError(f"Expected register, got '{tok}'", line_num)
+        return int(m.group(1))
+
+    if opcode == "MOV":
+        # CISC: MOV [addr], imm  OR  RISC-style MOV Rd, imm (pass-through)
+        if len(ops) != 2:
+            raise InvalidInstructionError("MOV expects 2 operands", line_num)
+        if _CISC_MEM_RE.match(ops[0]):
+            # CISC memory destination
+            addr = mem(ops[0])
+            if not _IMMEDIATE_RE.match(ops[1]):
+                raise InvalidInstructionError(f"MOV [addr], <imm> expects immediate, got '{ops[1]}'", line_num)
+            imm = int(ops[1])
+            return [f"MOV R{sa}, {imm}", f"STORE R{sa}, {addr}"]
+        # RISC-style MOV: unchanged
+        rd = reg(ops[0])
+        if not _IMMEDIATE_RE.match(ops[1]):
+            raise InvalidInstructionError(f"MOV expects immediate, got '{ops[1]}'", line_num)
+        return [f"MOV R{rd}, {ops[1]}"]
+
+    if opcode == "LOAD":
+        # CISC: LOAD Rd, [addr]  —  pass through as RISC: LOAD Rd, addr
+        if len(ops) != 2:
+            raise InvalidInstructionError("LOAD expects 2 operands", line_num)
+        rd = reg(ops[0])
+        # Accept either [addr] or bare addr
+        m = _CISC_MEM_RE.match(ops[1])
+        addr = int(m.group(1)) if m else (int(ops[1]) if _IMMEDIATE_RE.match(ops[1]) else None)
+        if addr is None:
+            raise InvalidInstructionError(f"LOAD expects [addr] or addr, got '{ops[1]}'", line_num)
+        return [f"LOAD R{rd}, {addr}"]
+
+    if opcode == "STORE":
+        # CISC: STORE [addr], Rs  —  reorder to RISC: STORE Rs, addr
+        if len(ops) != 2:
+            raise InvalidInstructionError("STORE expects 2 operands", line_num)
+        if _CISC_MEM_RE.match(ops[0]):
+            addr = mem(ops[0])
+            rs = reg(ops[1])
+            return [f"STORE R{rs}, {addr}"]
+        # RISC-style: STORE Rs, addr  —  pass through
+        rs = reg(ops[0])
+        if not _IMMEDIATE_RE.match(ops[1]):
+            raise InvalidInstructionError(f"STORE expects addr, got '{ops[1]}'", line_num)
+        return [f"STORE R{rs}, {ops[1]}"]
+
+    if opcode in ("ADD", "SUB", "MUL"):
+        if len(ops) == 2:
+            # CISC: OP [a], [b]  →  LOAD Ra, a ; LOAD Rb, b ; OP Ra, Ra, Rb ; STORE Ra, a
+            a = mem(ops[0])
+            b = mem(ops[1])
+            return [
+                f"LOAD R{sa}, {a}",
+                f"LOAD R{sb}, {b}",
+                f"{opcode} R{sa}, R{sa}, R{sb}",
+                f"STORE R{sa}, {a}",
+            ]
+        if len(ops) == 3:
+            # RISC form: OP Rd, Rs1, Rs2 — pass through
+            rd = reg(ops[0])
+            rs1 = reg(ops[1])
+            rs2 = reg(ops[2])
+            return [f"{opcode} R{rd}, R{rs1}, R{rs2}"]
+        raise InvalidInstructionError(f"{opcode} expects 2 or 3 operands", line_num)
+
+    if opcode == "INC":
+        # CISC: INC [addr]  →  LOAD Ra, addr ; MOV Rb, 1 ; ADD Ra, Ra, Rb ; STORE Ra, addr
+        if len(ops) != 1:
+            raise InvalidInstructionError("INC expects 1 operand", line_num)
+        addr = mem(ops[0])
+        return [
+            f"LOAD R{sa}, {addr}",
+            f"MOV R{sb}, 1",
+            f"ADD R{sa}, R{sa}, R{sb}",
+            f"STORE R{sa}, {addr}",
+        ]
+
+    if opcode == "DEC":
+        if len(ops) != 1:
+            raise InvalidInstructionError("DEC expects 1 operand", line_num)
+        addr = mem(ops[0])
+        return [
+            f"LOAD R{sa}, {addr}",
+            f"MOV R{sb}, 1",
+            f"SUB R{sa}, R{sa}, R{sb}",
+            f"STORE R{sa}, {addr}",
+        ]
+
+    if opcode in ("BEQ", "BNE"):
+        if len(ops) != 3:
+            raise InvalidInstructionError(f"{opcode} expects 3 operands", line_num)
+        label = ops[2]
+        # Check if operands are memory refs (CISC) or registers (RISC)
+        if _CISC_MEM_RE.match(ops[0]) and _CISC_MEM_RE.match(ops[1]):
+            a = mem(ops[0])
+            b = mem(ops[1])
+            return [
+                f"LOAD R{sa}, {a}",
+                f"LOAD R{sb}, {b}",
+                f"{opcode} R{sa}, R{sb}, {label}",
+            ]
+        # Pass-through register form
+        rs1 = reg(ops[0])
+        rs2 = reg(ops[1])
+        return [f"{opcode} R{rs1}, R{rs2}, {label}"]
+
+    if opcode == "JMP":
+        if len(ops) != 1:
+            raise InvalidInstructionError("JMP expects 1 operand", line_num)
+        return [f"JMP {ops[0]}"]
+
+    if opcode in ("HALT", "NOP"):
+        return [opcode]
+
+    raise ParseError(f"Unsupported CISC opcode '{opcode}' for CISC→RISC transpilation", line_num)

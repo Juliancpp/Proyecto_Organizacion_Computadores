@@ -83,7 +83,7 @@ class ParseResult:
 # Helper regex patterns
 # ---------------------------------------------------------------------------
 
-_REGISTER_RE = re.compile(r"^R([0-7])$", re.IGNORECASE)
+_REGISTER_RE = re.compile(r"^R?([0-7])$", re.IGNORECASE)
 _MEMORY_REF_RE = re.compile(r"^\[(\d+)\]$")       # e.g. [100]
 _LABEL_DEF_RE = re.compile(r"^([A-Za-z_]\w*):$")  # e.g. LOOP:
 _IMMEDIATE_RE = re.compile(r"^-?\d+$")
@@ -199,8 +199,8 @@ def _parse_risc_instruction(
             raise InvalidInstructionError(f"Invalid address '{operands_raw[1]}'", line_num)
         operands = [rs, addr]
 
-    elif opcode in ("ADD", "SUB"):
-        # ADD/SUB Rd, Rs1, Rs2
+    elif opcode in ("ADD", "SUB", "MUL"):
+        # ADD/SUB/MUL Rd, Rs1, Rs2
         if len(operands_raw) != 3:
             raise InvalidInstructionError(f"{opcode} expects 3 operands, got {len(operands_raw)}", line_num)
         rd = _parse_register(operands_raw[0])

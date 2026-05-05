@@ -21,7 +21,7 @@ from simulator.api.serializers import (
 from simulator.core.cpu_state import CPUState
 from simulator.core.exceptions import SimulatorError
 from simulator.parser.assembly_parser import parse_risc, parse_cisc
-from simulator.parser.transpiler import transpile_common_to_risc_cisc
+from simulator.parser.transpiler import transpile_common_to_risc_cisc, transpile_cisc_to_risc
 from simulator.risc.engine import execute_risc
 from simulator.risc.pipeline import execute_risc_pipeline
 from simulator.cisc.engine import execute_cisc, execute_cisc_pipeline
@@ -36,6 +36,53 @@ from simulator.x86.parser import parse_x86, is_x86_syntax
 from simulator.x86.engine import execute_x86, read_array_from_memory
 
 logger = logging.getLogger(__name__)
+
+
+# Patterns that indicate the code is already in an architecture-specific
+# syntax (not the restricted "common dialect" expected by the transpiler).
+import re as _re
+
+# CISC memory-destination MOV: "MOV [addr], ..."
+_CISC_MEM_DST_RE = _re.compile(r'\bMOV\s*\[', _re.IGNORECASE)
+
+# CISC memory-to-memory arithmetic: "ADD [..], [..]" / "MUL [..], [..]"
+_CISC_MEM_ARITH_RE = _re.compile(
+    r'\b(?:ADD|SUB|MUL|DIV)\s*\[[^\]]+\]\s*,\s*\[',
+    _re.IGNORECASE,
+)
+
+# CISC-only instructions: INC [addr], DEC [addr]
+_CISC_INC_DEC_RE = _re.compile(r'\b(?:INC|DEC)\s*\[', _re.IGNORECASE)
+
+# Bare-digit register usage in LOAD/STORE (e.g. "LOAD 1, [10]" without R prefix)
+_BARE_REG_LOAD_RE = _re.compile(r'\b(?:LOAD|STORE)\s+\d', _re.IGNORECASE)
+
+
+def _is_already_arch_specific(code: str) -> bool:
+    """
+    Return True if the source looks like it's already in a final
+    architecture's dialect (CISC or bare-register RISC) rather than the
+    restricted "common dialect" accepted by the transpiler.
+
+    The transpiler's common dialect requires:
+      - MOV Rn, imm        (never MOV [addr], ...)
+      - LOAD Rn, [addr]    (never LOAD n, [addr])
+      - ADD Rd, Rs1, Rs2   (never ADD [a], [b])
+      - No INC/DEC on memory
+
+    When any of these architecture-specific patterns appear, transpilation
+    will fail — so we skip it and run the code directly on the target
+    engine instead.
+    """
+    if _CISC_MEM_DST_RE.search(code):
+        return True
+    if _CISC_MEM_ARITH_RE.search(code):
+        return True
+    if _CISC_INC_DEC_RE.search(code):
+        return True
+    if _BARE_REG_LOAD_RE.search(code):
+        return True
+    return False
 
 
 class SimulateView(APIView):
@@ -98,6 +145,28 @@ class SimulateView(APIView):
             logger.info("X86 syntax detected, disabling transpile")
             transpile = False
 
+        # Skip transpile if code is already in architecture-specific syntax
+        # (e.g. CISC-style MOV [addr], imm or bare-digit LOAD/STORE operands).
+        # When the code is pure CISC, auto-generate an equivalent RISC version
+        # via the CISC→RISC transpiler so both engines can run in comparison.
+        if transpile and unified_code and _is_already_arch_specific(unified_code):
+            logger.info("Architecture-specific (CISC) syntax detected, "
+                        "auto-generating RISC via CISC→RISC transpiler")
+            try:
+                risc_code = transpile_cisc_to_risc(unified_code)
+                cisc_code = unified_code  # CISC code runs as-is
+                logger.info(
+                    "CISC→RISC transpilation successful: RISC=%d chars",
+                    len(risc_code),
+                )
+            except SimulatorError as exc:
+                logger.warning(
+                    "CISC→RISC transpilation failed, RISC side will fall back "
+                    "to direct execution: %s", exc,
+                )
+                # Fall through — RISC will fail with its own error but CISC runs.
+            transpile = False
+
         if transpile:
             if not unified_code:
                 return Response(
@@ -111,14 +180,19 @@ class SimulateView(APIView):
                 risc_code, cisc_code = transpile_common_to_risc_cisc(unified_code)
                 logger.info("Transpilation successful: RISC=%d chars, CISC=%d chars", len(risc_code), len(cisc_code))
             except SimulatorError as exc:
-                logger.error("Transpilation failed: %s", exc)
-                return Response(
-                    {
-                        "error": True,
-                        "message": f"Transpilation failed: {exc}",
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                # Graceful fallback: if the transpiler rejects the input,
+                # fall back to running the code as-is on the target engines.
+                # Each engine parser will report its own error if the syntax
+                # is actually incompatible, but many valid CISC/RISC programs
+                # get rejected by the transpiler because they aren't in the
+                # restricted "common dialect".
+                logger.warning(
+                    "Transpilation failed, falling back to direct execution: %s", exc,
                 )
+                errors_transpile = f"Transpilation skipped: {exc}"
+                transpile = False
+                # Note: risc_code and cisc_code remain empty; unified_code will
+                # be passed directly to each engine below.
 
         response_data: dict = {}
         errors: dict = {}

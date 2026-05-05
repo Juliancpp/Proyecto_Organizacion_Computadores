@@ -124,6 +124,8 @@ def _execute_instruction(
         _exec_add(state, ops)
     elif opcode == "SUB":
         _exec_sub(state, ops)
+    elif opcode == "MUL":
+        _exec_mul(state, ops)
     elif opcode == "MOV":
         _exec_mov(state, ops)
     elif opcode == "BEQ":
@@ -291,6 +293,48 @@ def _exec_sub(state: CPUState, ops: list[Any]) -> None:
         inputs=[val1, val2], output=result,
         meta={"operation": "SUB"},
     ))
+    state.add_event(Event(
+        Component.REGISTERS, f"WRITE R{rd}",
+        inputs=[result], output=result,
+        meta={"register": f"R{rd}"},
+    ))
+    state.write_register(rd, result)
+    state.end_cycle()
+
+
+# ---------------------------------------------------------------------------
+# MUL Rd, Rs1, Rs2  →  3 cycles  (multi-cycle ALU op)
+# ---------------------------------------------------------------------------
+
+def _exec_mul(state: CPUState, ops: list[Any]) -> None:
+    rd, rs1, rs2 = ops
+    val1 = state.read_register(rs1)
+    val2 = state.read_register(rs2)
+    result = val1 * val2
+
+    # Cycle 1: decode + read operands
+    state.new_cycle()
+    state.add_event(Event(
+        Component.CONTROL, "DECODE instruction MUL",
+        inputs=[f"R{rd}", f"R{rs1}", f"R{rs2}"], output="MUL decoded",
+    ))
+    state.add_event(Event(
+        Component.REGISTERS, f"READ R{rs1}, R{rs2}",
+        inputs=[f"R{rs1}", f"R{rs2}"], output=[val1, val2],
+    ))
+    state.end_cycle()
+
+    # Cycle 2: multiply (multi-cycle ALU)
+    state.new_cycle()
+    state.add_event(Event(
+        Component.ALU, "MUL operation (multi-cycle)",
+        inputs=[val1, val2], output=result,
+        meta={"operation": "MUL"},
+    ))
+    state.end_cycle()
+
+    # Cycle 3: writeback
+    state.new_cycle()
     state.add_event(Event(
         Component.REGISTERS, f"WRITE R{rd}",
         inputs=[result], output=result,
